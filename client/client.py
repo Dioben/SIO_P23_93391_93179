@@ -31,6 +31,8 @@ def main():
     media_list = req.json()
 
 
+    req2 = requests.get(f'{SERVER_URL}/api/protocols')
+    print(req2.status_code,req2.text)
     # Present a simple selection menu    
     idx = 0
     print("MEDIA CATALOG\n")

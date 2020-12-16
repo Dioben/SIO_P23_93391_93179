@@ -30,6 +30,16 @@ CHUNK_SIZE = 1024 * 4
 class MediaServer(resource.Resource):
     isLeaf = True
 
+
+    def do_get_protocols(self,request):
+        protocolmap = {
+            'ciphers':['AES-256','Camelia-256'],
+            'digests':['SHA-256','BLAKE2'],
+            'modes':['CBC','CFB','OFB'],
+        }
+
+        request.responseHeaders.addRawHeader(b"content-type", b"application/json")
+        return json.dumps(protocolmap).encode("latin")
     # Send the list of media files to clients
     def do_list(self, request):
 
