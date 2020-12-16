@@ -33,8 +33,8 @@ class MediaServer(resource.Resource):
 
     def do_get_protocols(self,request):
         protocolmap = {
-            'ciphers':['AES-256','Camelia-256'],
-            'digests':['SHA-256','BLAKE2'],
+            'ciphers':['AES-256','Camellia-256'],
+            'digests':['SHA-256','BLAKE2b'],
             'modes':['CBC','CFB','OFB'],
         }
 
