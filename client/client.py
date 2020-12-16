@@ -6,6 +6,21 @@ import os
 import subprocess
 import time
 import sys
+from cryptography.hazmat.primitives import ciphers,hashes
+from random import choice
+
+#consider moving these into a shared file
+cipherposs = {'AES-256':ciphers.algorithms.AES,'Camellia-256':ciphers.algorithms.Camellia}
+modeposs = {'CBC':ciphers.modes.CBC,'CFB':ciphers.modes.CFB,'OFB':ciphers.modes.OFB}
+digests = {'SHA-256':hashes.SHA256,'BLAKE2b':hashes.BLAKE2b}
+encodings = {'AES-256':(0).to_bytes(1,"big"),
+             'Camellia-256':(1).to_bytes(1,"big"),
+             'CBC':(0).to_bytes(1,"big"),
+             'CFB':(1).to_bytes(1,"big"),
+             'OFB':(2).to_bytes(1,"big"),
+             'SHA-256':(0).to_bytes(1,"big"),
+             'BLAKE2b':(1).to_bytes(1,"big")}
+
 
 logger = logging.getLogger('root')
 FORMAT = "[%(filename)s:%(lineno)s - %(funcName)20s() ] %(message)s"
@@ -24,6 +39,17 @@ def main():
     
     # TODO: Secure the session
 
+    req = requests.get(f'{SERVER_URL}/api/protocols')
+    if req.status_code==200:
+        print("Got Protocol List")
+    settables = json.loads(req.text)
+    print(settables)
+    cipher = cipherposs[choice(settables['ciphers'])]
+    mode = modeposs[choice(settables['modes'])]
+    hashfunc = digests[choice(settables['digests'])]
+
+    print("chose ",cipher,mode,hashfunc)
+    
     req = requests.get(f'{SERVER_URL}/api/list')
     if req.status_code == 200:
         print("Got Server List")
@@ -31,8 +57,7 @@ def main():
     media_list = req.json()
 
 
-    req2 = requests.get(f'{SERVER_URL}/api/protocols')
-    print(req2.status_code,req2.text)
+    
     # Present a simple selection menu    
     idx = 0
     print("MEDIA CATALOG\n")
