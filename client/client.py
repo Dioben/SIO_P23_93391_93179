@@ -59,15 +59,18 @@ def main():
     print("chose ",cipherstring,modestring,digeststring)
     
     #Diffie-Hellman setup- using ephemeral elliptic for max performance/safety
+    salt = os.urandom(32)
+    
     private_key = ec.generate_private_key(ec.SECP384R1())
     sendable_public_key = private_key.public_key()
     payload = sendable_public_key.public_bytes(encoding=serialization.Encoding.PEM,format=serialization.PublicFormat.SubjectPublicKeyInfo)
     
-    req = requests.post(f'{SERVER_URL}/api/key',data=payload)
-  
+    req = requests.post(f'{SERVER_URL}/api/key',data=encodings[digeststring]+salt+payload)
+    
     peer_public_key = req.content
     peer_public_key = serialization.load_pem_public_key(peer_public_key)
     shared_key = private_key.exchange(ec.ECDH(), peer_public_key)
+    derived_key = HKDF(algorithm=hashfunc(),length=32,salt=salt,info=None).derive(shared_key)
     req = requests.get(f'{SERVER_URL}/api/list')
     
     if req.status_code == 200:
