@@ -19,6 +19,16 @@ FORMAT = "[%(filename)s:%(lineno)s - %(funcName)20s() ] %(message)s"
 logging.basicConfig(format=FORMAT)
 logger.setLevel(logging.DEBUG)
 
+
+cipherposs = {'AES-256':ciphers.algorithms.AES,'Camellia-256':ciphers.algorithms.Camellia}
+modeposs = {'CBC':ciphers.modes.CBC,'CFB':ciphers.modes.CFB,'OFB':ciphers.modes.OFB}
+digests = {'SHA-256':hashes.SHA256,'BLAKE2b':hashes.BLAKE2b}
+
+
+HASHES={0:hashes.SHA256,1:hashes.BLAKE2b}
+CIPHERS={(0).to_bytes(1,"big"):'AES-256',(1).to_bytes(1,"big"):'Camellia-256'}         
+MODES = {(0).to_bytes(1,"big"):'CBC',(1).to_bytes(1,"big"):'CFB',(2).to_bytes(1,"big"):'OFB'}
+
 CATALOG = { '898a08080d1840793122b7e118b27a95d117ebce': 
             {
                 'name': 'Sunny Afternoon - Upbeat Ukulele Background Music',
@@ -39,11 +49,17 @@ class MediaServer(resource.Resource):
 
     def do_key_set(self,request):
         peer_public_key= request.content.read()
+        encoding = peer_public_key[0]
+        print(encoding)
+        salt = peer_public_key[1:33]
+        peer_public_key = peer_public_key[33::]
+
         peer_public_key = serialization.load_pem_public_key(peer_public_key)
-       
         private_key = ec.generate_private_key(ec.SECP384R1())
         sendable_public_key = private_key.public_key()
         shared_key = private_key.exchange(ec.ECDH(), peer_public_key)
+        derived_key = HKDF(algorithm=HASHES[encoding](),length=32,salt=salt,info=None).derive(shared_key)
+        print("derived the key\n",derived_key)
         return sendable_public_key.public_bytes(encoding=serialization.Encoding.PEM,format=serialization.PublicFormat.SubjectPublicKeyInfo)
 
     def do_get_protocols(self,request):
