@@ -14,14 +14,14 @@ from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 #consider moving these into a shared file
 cipherposs = {'AES-256':ciphers.algorithms.AES,'Camellia-256':ciphers.algorithms.Camellia}
 modeposs = {'CBC':ciphers.modes.CBC,'CFB':ciphers.modes.CFB,'OFB':ciphers.modes.OFB}
-digests = {'SHA-256':hashes.SHA256,'BLAKE2b':hashes.BLAKE2b}
+digests = {'SHA-256':hashes.SHA256,'SHA3-256':hashes.SHA3_256}
 encodings = {'AES-256':(0).to_bytes(1,"big"),
              'Camellia-256':(1).to_bytes(1,"big"),
              'CBC':(0).to_bytes(1,"big"),
              'CFB':(1).to_bytes(1,"big"),
              'OFB':(2).to_bytes(1,"big"),
              'SHA-256':(0).to_bytes(1,"big"),
-             'BLAKE2b':(1).to_bytes(1,"big")}
+             'SHA3-256':(1).to_bytes(1,"big")}
 
 
 logger = logging.getLogger('root')
@@ -38,7 +38,7 @@ def main():
 
     # Get a list of media files
     print("Contacting Server")
-    
+   
     # TODO: Secure the session
 
     req = requests.get(f'{SERVER_URL}/api/protocols')
@@ -57,7 +57,8 @@ def main():
     hashfunc = digests[digeststring]
 
     print("chose ",cipherstring,modestring,digeststring)
-    
+    s = requests.Session()
+    s.headers.update({'hashmode':encodings[digeststring],'ciphermode':encodings[cipherstring],'modemode':encodings[modestring]})
     #Diffie-Hellman setup- using ephemeral elliptic for max performance/safety
     salt = os.urandom(32)
     
@@ -65,7 +66,7 @@ def main():
     sendable_public_key = private_key.public_key()
     payload = sendable_public_key.public_bytes(encoding=serialization.Encoding.PEM,format=serialization.PublicFormat.SubjectPublicKeyInfo)
     
-    req = requests.post(f'{SERVER_URL}/api/key',data=encodings[digeststring]+salt+payload)
+    req = s.post(f'{SERVER_URL}/api/key',data=salt+payload)
     
     peer_public_key = req.content
     peer_public_key = serialization.load_pem_public_key(peer_public_key)

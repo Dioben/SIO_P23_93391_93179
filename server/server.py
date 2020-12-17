@@ -22,10 +22,10 @@ logger.setLevel(logging.DEBUG)
 
 cipherposs = {'AES-256':ciphers.algorithms.AES,'Camellia-256':ciphers.algorithms.Camellia}
 modeposs = {'CBC':ciphers.modes.CBC,'CFB':ciphers.modes.CFB,'OFB':ciphers.modes.OFB}
-digests = {'SHA-256':hashes.SHA256,'BLAKE2b':hashes.BLAKE2b}
+digests = {'SHA-256':hashes.SHA256,'SHA3-256':hashes.SHA3_256}
 
 
-HASHES={0:hashes.SHA256,1:hashes.BLAKE2b}
+HASHES={0:hashes.SHA256,1:hashes.SHA3_256}
 CIPHERS={(0).to_bytes(1,"big"):'AES-256',(1).to_bytes(1,"big"):'Camellia-256'}         
 MODES = {(0).to_bytes(1,"big"):'CBC',(1).to_bytes(1,"big"):'CFB',(2).to_bytes(1,"big"):'OFB'}
 
@@ -48,24 +48,23 @@ class MediaServer(resource.Resource):
 
 
     def do_key_set(self,request):
+        encoding = request.getHeader(b'hashmode')[0]
+        salt = request.getHeader(b'salt')
         peer_public_key= request.content.read()
-        encoding = peer_public_key[0]
-        print(encoding)
-        salt = peer_public_key[1:33]
-        peer_public_key = peer_public_key[33::]
+        salt = peer_public_key[0:32]
+        peer_public_key = peer_public_key[32::]
 
         peer_public_key = serialization.load_pem_public_key(peer_public_key)
         private_key = ec.generate_private_key(ec.SECP384R1())
         sendable_public_key = private_key.public_key()
         shared_key = private_key.exchange(ec.ECDH(), peer_public_key)
-        derived_key = HKDF(algorithm=HASHES[encoding](),length=32,salt=salt,info=None).derive(shared_key)
-        print("derived the key\n",derived_key)
+        derived_key = HKDF(algorithm= HASHES[encoding](),length=32,salt=salt,info=None).derive(shared_key)
         return sendable_public_key.public_bytes(encoding=serialization.Encoding.PEM,format=serialization.PublicFormat.SubjectPublicKeyInfo)
 
     def do_get_protocols(self,request):
         protocolmap = {
             'ciphers':['AES-256','Camellia-256'],
-            'digests':['SHA-256','BLAKE2b'],
+            'digests':['SHA-256','SHA3-256'],
             'modes':['CBC','CFB','OFB'],
         }
 
