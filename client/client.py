@@ -6,8 +6,10 @@ import os
 import subprocess
 import time
 import sys
-from cryptography.hazmat.primitives import ciphers,hashes
+from cryptography.hazmat.primitives import ciphers,hashes,serialization
 from random import choice
+from cryptography.hazmat.primitives.asymmetric import ec
+from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 
 #consider moving these into a shared file
 cipherposs = {'AES-256':ciphers.algorithms.AES,'Camellia-256':ciphers.algorithms.Camellia}
@@ -42,15 +44,32 @@ def main():
     req = requests.get(f'{SERVER_URL}/api/protocols')
     if req.status_code==200:
         print("Got Protocol List")
-    settables = json.loads(req.text)
-    print(settables)
-    cipher = cipherposs[choice(settables['ciphers'])]
-    mode = modeposs[choice(settables['modes'])]
-    hashfunc = digests[choice(settables['digests'])]
-
-    print("chose ",cipher,mode,hashfunc)
     
+    settables = json.loads(req.text)
+    
+    cipherstring =choice(settables['ciphers'])
+    cipher = cipherposs[cipherstring]
+    
+    modestring=choice(settables['modes'])
+    mode = modeposs[modestring]
+    
+    digeststring =choice(settables['digests'])
+    hashfunc = digests[digeststring]
+
+    print("chose ",cipherstring,modestring,digeststring)
+    
+    #Diffie-Hellman setup- using ephemeral elliptic for max performance/safety
+    private_key = ec.generate_private_key(ec.SECP384R1())
+    sendable_public_key = private_key.public_key()
+    payload = sendable_public_key.public_bytes(encoding=serialization.Encoding.PEM,format=serialization.PublicFormat.SubjectPublicKeyInfo)
+    
+    req = requests.post(f'{SERVER_URL}/api/key',data=payload)
+  
+    peer_public_key = req.content
+    peer_public_key = serialization.load_pem_public_key(peer_public_key)
+    shared_key = private_key.exchange(ec.ECDH(), peer_public_key)
     req = requests.get(f'{SERVER_URL}/api/list')
+    
     if req.status_code == 200:
         print("Got Server List")
 

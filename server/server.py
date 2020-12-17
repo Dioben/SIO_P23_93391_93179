@@ -7,6 +7,12 @@ import binascii
 import json
 import os
 import math
+from cryptography.hazmat.primitives import ciphers,hashes,serialization
+from random import choice
+from cryptography.hazmat.primitives.asymmetric import ec
+from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+
+userkeys= {}
 
 logger = logging.getLogger('root')
 FORMAT = "[%(filename)s:%(lineno)s - %(funcName)20s() ] %(message)s"
@@ -30,6 +36,15 @@ CHUNK_SIZE = 1024 * 4
 class MediaServer(resource.Resource):
     isLeaf = True
 
+
+    def do_key_set(self,request):
+        peer_public_key= request.content.read()
+        peer_public_key = serialization.load_pem_public_key(peer_public_key)
+       
+        private_key = ec.generate_private_key(ec.SECP384R1())
+        sendable_public_key = private_key.public_key()
+        shared_key = private_key.exchange(ec.ECDH(), peer_public_key)
+        return sendable_public_key.public_bytes(encoding=serialization.Encoding.PEM,format=serialization.PublicFormat.SubjectPublicKeyInfo)
 
     def do_get_protocols(self,request):
         protocolmap = {
@@ -135,8 +150,6 @@ class MediaServer(resource.Resource):
         try:
             if request.path == b'/api/protocols':
                 return self.do_get_protocols(request)
-            #elif request.uri == 'api/key':
-            #...
             #elif request.uri == 'api/auth':
 
             elif request.path == b'/api/list':
@@ -157,6 +170,8 @@ class MediaServer(resource.Resource):
     # Handle a POST request
     def render_POST(self, request):
         logger.debug(f'Received POST for {request.uri}')
+        if request.path==b'/api/key':
+            return self.do_key_set(request)
         request.setResponseCode(501)
         return b''
 
