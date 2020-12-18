@@ -40,25 +40,32 @@ def main():
     print("Contacting Server")
    
     # TODO: Secure the session
+    s = requests.Session()
+    
+    protocolmap = {
+            'ciphers':['AES-256','Camellia-256'],
+            'digests':['SHA-256','SHA3-256'],
+            'modes':['CBC','CFB','OFB'],
+        }
 
-    req = requests.get(f'{SERVER_URL}/api/protocols')
+    req = s.get(f'{SERVER_URL}/api/protocols',params = protocolmap)
     if req.status_code==200:
         print("Got Protocol List")
     
-    settables = json.loads(req.text)
-    
-    cipherstring =choice(settables['ciphers'])
+    suite = req.text
+    info = suite.split("_")
+    cipherstring =info[4]
     cipher = cipherposs[cipherstring]
     
-    modestring=choice(settables['modes'])
+    modestring=info[5]
     mode = modeposs[modestring]
     
-    digeststring =choice(settables['digests'])
+    digeststring =info[6]
     hashfunc = digests[digeststring]
 
     print("chose ",cipherstring,modestring,digeststring)
-    s = requests.Session()
-    s.headers.update({'hashmode':encodings[digeststring],'ciphermode':encodings[cipherstring],'modemode':encodings[modestring]})
+    
+    s.headers.update({'hashmode':encodings[digeststring],'ciphermode':encodings[cipherstring],'modemode':encodings[modestring],'name':'bob'})
     #Diffie-Hellman setup- using ephemeral elliptic for max performance/safety
     salt = os.urandom(32)
     
