@@ -29,6 +29,8 @@ HASHES={0:hashes.SHA256,1:hashes.SHA3_256}
 CIPHERS={(0).to_bytes(1,"big"):'AES-256',(1).to_bytes(1,"big"):'Camellia-256'}         
 MODES = {(0).to_bytes(1,"big"):'CBC',(1).to_bytes(1,"big"):'CFB',(2).to_bytes(1,"big"):'OFB'}
 
+keys= {}
+
 CATALOG = { '898a08080d1840793122b7e118b27a95d117ebce': 
             {
                 'name': 'Sunny Afternoon - Upbeat Ukulele Background Music',
@@ -59,17 +61,21 @@ class MediaServer(resource.Resource):
         sendable_public_key = private_key.public_key()
         shared_key = private_key.exchange(ec.ECDH(), peer_public_key)
         derived_key = HKDF(algorithm= HASHES[encoding](),length=32,salt=salt,info=None).derive(shared_key)
+        keys[request.getHeader(b'name')]= derived_key
         return sendable_public_key.public_bytes(encoding=serialization.Encoding.PEM,format=serialization.PublicFormat.SubjectPublicKeyInfo)
 
     def do_get_protocols(self,request):
-        protocolmap = {
-            'ciphers':['AES-256','Camellia-256'],
-            'digests':['SHA-256','SHA3-256'],
-            'modes':['CBC','CFB','OFB'],
-        }
-
-        request.responseHeaders.addRawHeader(b"content-type", b"application/json")
-        return json.dumps(protocolmap).encode("latin")
+        protocol = 'TLS_ECHDE_RSA_'
+        ciphers = request.args[b'ciphers']
+        digests = request.args[b'digests']
+        modes = request.args[b'modes']
+        cipherchoice = choice(ciphers).decode('latin')
+        protocol+="WITH_"+cipherchoice+"_"
+        modechoice = choice(modes).decode('latin')
+        protocol+=modechoice+"_"
+        digestchoice = choice(digests).decode('latin')
+        protocol+=digestchoice
+        return protocol.encode('latin')
     # Send the list of media files to clients
     def do_list(self, request):
 
