@@ -42,6 +42,9 @@ def main():
     # TODO: Secure the session
     s = requests.Session()
     
+    identifier = 'mike' #replace with citizen card interaction
+    s.headers.update({'ID':identifier})
+
     protocolmap = {
             'ciphers':['AES-256','Camellia-256'],
             'digests':['SHA-256','SHA3-256'],
@@ -65,7 +68,9 @@ def main():
 
     print("chose ",cipherstring,modestring,digeststring)
     
-    s.headers.update({'hashmode':encodings[digeststring],'ciphermode':encodings[cipherstring],'modemode':encodings[modestring],'name':'bob'})
+    s.headers.update({'hashmode':encodings[digeststring],'ciphermode':encodings[cipherstring],'modemode':encodings[modestring]})#putting these in
+                                                                                                                                #so that people cant confuse server
+                                                                                                                                #by setting a new suite while impersonating
     #Diffie-Hellman setup- using ephemeral elliptic for max performance/safety
     salt = os.urandom(32)
     
@@ -79,7 +84,7 @@ def main():
     peer_public_key = serialization.load_pem_public_key(peer_public_key)
     shared_key = private_key.exchange(ec.ECDH(), peer_public_key)
     derived_key = HKDF(algorithm=hashfunc(),length=32,salt=salt,info=None).derive(shared_key)
-    req = requests.get(f'{SERVER_URL}/api/list')
+    req = s.get(f'{SERVER_URL}/api/list')
     
     if req.status_code == 200:
         print("Got Server List")

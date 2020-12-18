@@ -13,7 +13,7 @@ from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 
 userkeys= {}
-
+licenses = {'mike':5}
 logger = logging.getLogger('root')
 FORMAT = "[%(filename)s:%(lineno)s - %(funcName)20s() ] %(message)s"
 logging.basicConfig(format=FORMAT)
@@ -51,7 +51,6 @@ class MediaServer(resource.Resource):
 
     def do_key_set(self,request):
         encoding = request.getHeader(b'hashmode')[0]
-        salt = request.getHeader(b'salt')
         peer_public_key= request.content.read()
         salt = peer_public_key[0:32]
         peer_public_key = peer_public_key[32::]
@@ -61,7 +60,7 @@ class MediaServer(resource.Resource):
         sendable_public_key = private_key.public_key()
         shared_key = private_key.exchange(ec.ECDH(), peer_public_key)
         derived_key = HKDF(algorithm= HASHES[encoding](),length=32,salt=salt,info=None).derive(shared_key)
-        keys[request.getHeader(b'name')]= derived_key
+        keys[request.getHeader(b'ID')]= derived_key
         return sendable_public_key.public_bytes(encoding=serialization.Encoding.PEM,format=serialization.PublicFormat.SubjectPublicKeyInfo)
 
     def do_get_protocols(self,request):
@@ -78,7 +77,9 @@ class MediaServer(resource.Resource):
         return protocol.encode('latin')
     # Send the list of media files to clients
     def do_list(self, request):
-
+        print(request.requestHeaders)
+        if request.getHeader(b'ID') not in keys.keys():
+            return "register a key first".encode('latin')
         #auth = request.getHeader('Authorization')
         #if not auth:
         #    request.setResponseCode(401)
@@ -99,6 +100,7 @@ class MediaServer(resource.Resource):
 
         # Return list to client
         request.responseHeaders.addRawHeader(b"content-type", b"application/json")
+
         return json.dumps(media_list, indent=4).encode('latin')
 
 
