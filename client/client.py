@@ -42,9 +42,6 @@ def main():
     # TODO: Secure the session
     s = requests.Session()
     
-    identifier = 'mike' #replace with citizen card interaction
-    s.headers.update({'ID':identifier})
-
     protocolmap = {
             'ciphers':['AES-256','Camellia-256'],
             'digests':['SHA-256','SHA3-256'],
@@ -79,11 +76,12 @@ def main():
     payload = sendable_public_key.public_bytes(encoding=serialization.Encoding.PEM,format=serialization.PublicFormat.SubjectPublicKeyInfo)
     
     req = s.post(f'{SERVER_URL}/api/key',data=salt+payload)
-    
-    peer_public_key = req.content
+    serverID = req.content.split(b"\n",1)[0].decode('latin')
+    peer_public_key = req.content.split(b"\n",1)[1]
     peer_public_key = serialization.load_pem_public_key(peer_public_key)
     shared_key = private_key.exchange(ec.ECDH(), peer_public_key)
     derived_key = HKDF(algorithm=hashfunc(),length=32,salt=salt,info=None).derive(shared_key)
+    s.headers.update({'ID':serverID})
     req = s.get(f'{SERVER_URL}/api/list')
     
     if req.status_code == 200:
