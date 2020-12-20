@@ -5,11 +5,15 @@ import json
 import os
 import subprocess
 import time
+import datetime
 import sys
+import PyKCS11
+import getpass
 from cryptography.hazmat.primitives import ciphers,hashes,serialization
 from random import choice
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+from cryptography import x509
 
 #consider moving these into a shared file
 cipherposs = {'AES-256':ciphers.algorithms.AES,'Camellia-256':ciphers.algorithms.Camellia}
@@ -24,6 +28,15 @@ encodings = {'AES-256':(0).to_bytes(1,"big"),
              'SHA3-256':(1).to_bytes(1,"big")}
 
 
+lib = '/usr/local/lib/libpteidpkcs11.so'
+pkcs11 = PyKCS11.PyKCS11Lib()
+pkcs11.load(lib)
+with open("cert.der","rb") as cert:
+    certificate = x509.load_der_x509_certificate(cert.read())
+date =datetime.datetime.now()
+if certificate.not_valid_before>date or date>certificate.not_valid_after:
+    print("expired cert ",certificate.public_key)
+    sys.exit(0)
 logger = logging.getLogger('root')
 FORMAT = "[%(filename)s:%(lineno)s - %(funcName)20s() ] %(message)s"
 logging.basicConfig(format=FORMAT)
@@ -32,6 +45,11 @@ logger.setLevel(logging.INFO)
 SERVER_URL = 'http://127.0.0.1:8080'
 
 def main():
+
+    
+    slots = pkcs11.getSlotList()
+    citizencardsession = pkcs11.openSession(slots[0])
+    
     print("|--------------------------------------|")
     print("|         SECURE MEDIA CLIENT          |")
     print("|--------------------------------------|\n")
@@ -64,6 +82,9 @@ def main():
     hashfunc = digests[digeststring]
 
     print("chose ",cipherstring,modestring,digeststring)
+    citizen_private_key = citizencardsession.findObjects([(PyKCS11.CKA_CLASS, PyKCS11.CKO_PRIVATE_KEY),(PyKCS11.CKA_LABEL, 'CITIZEN AUTHENTICATION KEY')])[0]
+    mechanism = PyKCS11.Mechanism(PyKCS11.CKM_SHA256_RSA_PKCS,None) #BASICALLY MANDATORY, IT'S EITHER SHA 2 OR SHA 1/MD5 WHICH ARENT TRUSTWORTHY
+    
     
     s.headers.update({'hashmode':encodings[digeststring],'ciphermode':encodings[cipherstring],'modemode':encodings[modestring]})#putting these in
                                                                                                                                 #so that people cant confuse server
