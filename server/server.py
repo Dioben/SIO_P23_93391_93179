@@ -12,6 +12,7 @@ from random import choice
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 import uuid
+from time import time
 userkeys= {}
 licenses = {'mike':5}
 logger = logging.getLogger('root')
@@ -19,6 +20,8 @@ FORMAT = "[%(filename)s:%(lineno)s - %(funcName)20s() ] %(message)s"
 logging.basicConfig(format=FORMAT)
 logger.setLevel(logging.DEBUG)
 
+HOUR = 3600
+DAY = 24*3600
 
 cipherposs = {'AES-256':ciphers.algorithms.AES,'Camellia-256':ciphers.algorithms.Camellia}
 modeposs = {'CBC':ciphers.modes.CBC,'CFB':ciphers.modes.CFB,'OFB':ciphers.modes.OFB}
@@ -62,7 +65,7 @@ class MediaServer(resource.Resource):
         derived_key = HKDF(algorithm= HASHES[encoding](),length=32,salt=salt,info=None).derive(shared_key)
         
         user = uuid.uuid4().hex
-        keys[(user).encode('latin')]= derived_key
+        keys[(user).encode('latin')]= (derived_key,time()+DAY)
         
 
         return (user+"\n").encode('latin')+sendable_public_key.public_bytes(encoding=serialization.Encoding.PEM,format=serialization.PublicFormat.SubjectPublicKeyInfo)
