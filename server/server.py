@@ -33,7 +33,7 @@ CIPHERS={(0).to_bytes(1,"big"):'AES-256',(1).to_bytes(1,"big"):'Camellia-256'}
 MODES = {(0).to_bytes(1,"big"):'CBC',(1).to_bytes(1,"big"):'CFB',(2).to_bytes(1,"big"):'OFB'}
 
 keys= {}
-
+licenses = {}
 CATALOG = { '898a08080d1840793122b7e118b27a95d117ebce': 
             {
                 'name': 'Sunny Afternoon - Upbeat Ukulele Background Music',
@@ -67,35 +67,42 @@ class MediaServer(resource.Resource):
         user = uuid.uuid4().hex
         keys[(user).encode('latin')]= (derived_key,time()+DAY)
         
-
+        #TODO: ENCRYPT WITH OUR PRIVATE KEY
         return (user+"\n").encode('latin')+sendable_public_key.public_bytes(encoding=serialization.Encoding.PEM,format=serialization.PublicFormat.SubjectPublicKeyInfo)
 
-    def do_get_protocols(self,request):#gotta restrict this to good ones only
+    def do_get_protocols(self,request):
         protocol = 'TLS_ECHDE_RSA_'
         ciphers = [x for x in request.args[b'ciphers'] if x.decode('latin') in cipherposs.keys()]
         if ciphers ==[]:
-            return
+            return b'No available ciphers'
         digestposs = [x for x in request.args[b'digests'] if x.decode('latin') in digests.keys()]
         if digestposs==[]:
-            return
+            return b'No available digests'
         modes = [x for x in request.args[b'modes'] if x.decode('latin') in modeposs.keys()]
         if modes==[]:
-            return
+            return b'No available modes'
         cipherchoice = choice(ciphers).decode('latin')
         protocol+="WITH_"+cipherchoice+"_"
         modechoice = choice(modes).decode('latin')
         protocol+=modechoice+"_"
         digestchoice = choice(digestposs).decode('latin')
         protocol+=digestchoice
+        #TODO: ALSO SEND OUR CERTIFICATE
         return protocol.encode('latin')
+
     # Send the list of media files to clients
     def do_list(self, request):
         if request.getHeader(b'ID') not in keys.keys():
+            request.setResponseCode(401)
             return "register a key first".encode('latin')
-        #auth = request.getHeader('Authorization')
-        #if not auth:
-        #    request.setResponseCode(401)
-        #    return 'Not authorized'
+        if keys[request.getHeader(b'ID')][1]<time():
+            try:
+                del keys[request.getHeader(b'ID')]
+            except:
+                pass
+            request.setResponseCode(401)
+            return "your key has expired".encode('latin')
+        #TODO: ENCRYPT WITH SHARED KEY
 
 
         # Build list
@@ -178,14 +185,49 @@ class MediaServer(resource.Resource):
         request.responseHeaders.addRawHeader(b"content-type", b"application/json")
         return json.dumps({'error': 'unknown'}, indent=4).encode('latin')
 
-    # Handle a GET request
+    
+    
+    
+    
+  
+
+    def try_auth(self,request):
+        if request.getHeader(b'ID') not in keys.keys():
+            return "register a key first".encode('latin')
+        #TODO:
+        '''verify payload to auth user
+            encrypt the key before returning it
+        ''' 
+        userpk = None #decrypt this from the request
+        key = os.urandom(256) 
+        licenses[request.getHeader(b'ID')]=(userpk,key,time()+HOUR)
+        return key
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  # Handle a GET request
     def render_GET(self, request):
         logger.debug(f'Received request for {request.uri}')
 
         try:
             if request.path == b'/api/protocols':
                 return self.do_get_protocols(request)
-            #elif request.uri == 'api/auth':
 
             elif request.path == b'/api/list':
                 return self.do_list(request)
@@ -207,13 +249,19 @@ class MediaServer(resource.Resource):
         logger.debug(f'Received POST for {request.uri}')
         if request.path==b'/api/key':
             return self.do_key_set(request)
+        elif request.path == 'api/auth':
+            return self.try_auth(request)
         request.setResponseCode(501)
         return b''
 
 
+
+
+
+
 print("Server started")
 print("URL is: http://IP:8080")
-
+#TODO: WE PROBABLY WANNA LOAD CERTS AROUND HERE
 s = server.Site(MediaServer())
 reactor.listenTCP(8080, s)
 reactor.run()

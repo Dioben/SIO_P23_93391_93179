@@ -39,7 +39,7 @@ def main():
     # Get a list of media files
     print("Contacting Server")
    
-    # TODO: Secure the session
+    # TODO: Secure the session , load our keys all the way up here
     s = requests.Session()
     
     protocolmap = {
@@ -83,10 +83,8 @@ def main():
     derived_key = HKDF(algorithm=hashfunc(),length=32,salt=salt,info=None).derive(shared_key)
     s.headers.update({'ID':serverID})
     req = s.get(f'{SERVER_URL}/api/list')
-    
     if req.status_code == 200:
         print("Got Server List")
-
     media_list = req.json()
 
 
