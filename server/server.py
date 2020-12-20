@@ -11,7 +11,7 @@ from cryptography.hazmat.primitives import ciphers,hashes,serialization
 from random import choice
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
-
+import uuid
 userkeys= {}
 licenses = {'mike':5}
 logger = logging.getLogger('root')
@@ -60,24 +60,33 @@ class MediaServer(resource.Resource):
         sendable_public_key = private_key.public_key()
         shared_key = private_key.exchange(ec.ECDH(), peer_public_key)
         derived_key = HKDF(algorithm= HASHES[encoding](),length=32,salt=salt,info=None).derive(shared_key)
-        keys[request.getHeader(b'ID')]= derived_key
-        return sendable_public_key.public_bytes(encoding=serialization.Encoding.PEM,format=serialization.PublicFormat.SubjectPublicKeyInfo)
+        
+        user = uuid.uuid4().hex
+        keys[(user).encode('latin')]= derived_key
+        
 
-    def do_get_protocols(self,request):
+        return (user+"\n").encode('latin')+sendable_public_key.public_bytes(encoding=serialization.Encoding.PEM,format=serialization.PublicFormat.SubjectPublicKeyInfo)
+
+    def do_get_protocols(self,request):#gotta restrict this to good ones only
         protocol = 'TLS_ECHDE_RSA_'
-        ciphers = request.args[b'ciphers']
-        digests = request.args[b'digests']
-        modes = request.args[b'modes']
+        ciphers = [x for x in request.args[b'ciphers'] if x.decode('latin') in cipherposs.keys()]
+        if ciphers ==[]:
+            return
+        digestposs = [x for x in request.args[b'digests'] if x.decode('latin') in digests.keys()]
+        if digestposs==[]:
+            return
+        modes = [x for x in request.args[b'modes'] if x.decode('latin') in modeposs.keys()]
+        if modes==[]:
+            return
         cipherchoice = choice(ciphers).decode('latin')
         protocol+="WITH_"+cipherchoice+"_"
         modechoice = choice(modes).decode('latin')
         protocol+=modechoice+"_"
-        digestchoice = choice(digests).decode('latin')
+        digestchoice = choice(digestposs).decode('latin')
         protocol+=digestchoice
         return protocol.encode('latin')
     # Send the list of media files to clients
     def do_list(self, request):
-        print(request.requestHeaders)
         if request.getHeader(b'ID') not in keys.keys():
             return "register a key first".encode('latin')
         #auth = request.getHeader('Authorization')
