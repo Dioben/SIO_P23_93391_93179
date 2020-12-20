@@ -13,6 +13,8 @@ from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 import uuid
 from time import time
+from cryptography import x509
+
 userkeys= {}
 licenses = {'mike':5}
 logger = logging.getLogger('root')
@@ -22,6 +24,11 @@ logger.setLevel(logging.DEBUG)
 
 HOUR = 3600
 DAY = 24*3600
+
+with open("127.0.0.1.crt","rb") as cert:
+    certificate = x509.load_pem_x509_certificate(cert.read())
+with open('privkey.pem','rb') as keyfile:
+    self_private_key = serialization.load_pem_private_key(keyfile.read(),password=None)
 
 cipherposs = {'AES-256':ciphers.algorithms.AES,'Camellia-256':ciphers.algorithms.Camellia}
 modeposs = {'CBC':ciphers.modes.CBC,'CFB':ciphers.modes.CFB,'OFB':ciphers.modes.OFB}
