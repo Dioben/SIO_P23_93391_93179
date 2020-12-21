@@ -71,7 +71,7 @@ def main():
     if req.status_code==200:
         print("Got Protocol List")
     
-    suite = req.text
+    suite = req.text.split("\n",1)[0]
     info = suite.split("_")
     cipherstring =info[4]
     cipher = cipherposs[cipherstring]
