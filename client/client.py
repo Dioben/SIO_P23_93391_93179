@@ -66,7 +66,8 @@ def main():
             'modes':['CBC','CFB','OFB'],
         }
 
-    req = s.get(f'{SERVER_URL}/api/protocols',params = protocolmap)
+    certsecret= os.urandom(32)
+    req = s.post(f'{SERVER_URL}/api/protocols',data = certsecret+json.dumps(protocolmap).encode('latin'))
     if req.status_code==200:
         print("Got Protocol List")
     
