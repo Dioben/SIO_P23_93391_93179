@@ -31,6 +31,8 @@ with open("127.0.0.1.crt","rb") as cert:
 with open('privkey.pem','rb') as keyfile:
     SELF_PRIVATE_KEY = serialization.load_pem_private_key(keyfile.read(),password=None)
 
+print(SELF_PRIVATE_KEY.public_key()==SELF_CERTIFICATE.public_key)
+
 cipherposs = {'AES-256':ciphers.algorithms.AES,'Camellia-256':ciphers.algorithms.Camellia}
 modeposs = {'CBC':ciphers.modes.CBC,'CFB':ciphers.modes.CFB,'OFB':ciphers.modes.OFB}
 digests = {'SHA-256':hashes.SHA256,'SHA3-256':hashes.SHA3_256}
@@ -106,7 +108,6 @@ class MediaServer(resource.Resource):
         
         protocol+=digestchoice+"\n"
         
-
         encrypted_secret = SELF_PRIVATE_KEY.sign(secret,asympad.PSS(mgf= asympad.MGF1(hashf),salt_length=asympad.PSS.MAX_LENGTH),hashf)
         return protocol.encode('latin')+SELF_CERTIFICATE.public_bytes(encoding=serialization.Encoding.PEM)+encrypted_secret
 

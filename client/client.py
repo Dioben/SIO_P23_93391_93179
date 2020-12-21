@@ -14,6 +14,7 @@ from random import choice
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 from cryptography import x509
+from cryptography.hazmat.primitives.asymmetric import padding as asympad
 
 #consider moving these into a shared file
 cipherposs = {'AES-256':ciphers.algorithms.AES,'Camellia-256':ciphers.algorithms.Camellia}
@@ -83,6 +84,18 @@ def main():
     hashfunc = digests[digeststring]
 
     print("chose ",cipherstring,modestring,digeststring)
+
+    servercert = req.content.split(b"\n",1)[1].split(b"\n-----END CERTIFICATE-----\n")[0]+b"\n-----END CERTIFICATE-----\n"
+    proof =req.content.split(b"\n-----END CERTIFICATE-----\n")[1]
+    servercert = x509.load_pem_x509_certificate(servercert)
+    date =datetime.datetime.now()
+    if certificate.not_valid_before>date or date>certificate.not_valid_after:
+        print("expired cert ",certificate.public_key)
+        return
+    print(certificate.public_key())
+    certificate.public_key().verify(proof,certsecret,asympad.PSS(mgf=asympad.MGF1(hashfunc()),salt_length=asympad.PSS.MAX_LENGTH),hashfunc())
+
+
     citizen_private_key = citizencardsession.findObjects([(PyKCS11.CKA_CLASS, PyKCS11.CKO_PRIVATE_KEY),(PyKCS11.CKA_LABEL, 'CITIZEN AUTHENTICATION KEY')])[0]
     mechanism = PyKCS11.Mechanism(PyKCS11.CKM_SHA256_RSA_PKCS,None) #BASICALLY MANDATORY, IT'S EITHER SHA 2 OR SHA 1/MD5 WHICH ARENT TRUSTWORTHY
     
