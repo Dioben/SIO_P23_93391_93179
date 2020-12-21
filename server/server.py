@@ -7,10 +7,11 @@ import binascii
 import json
 import os
 import math
-from cryptography.hazmat.primitives import ciphers,hashes,serialization
+from cryptography.hazmat.primitives import ciphers,hashes,serialization,padding
 from random import choice
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+from cryptography.hazmat.primitives.asymmetric import padding as asympad
 import uuid
 from time import time
 from cryptography import x509
@@ -26,9 +27,9 @@ HOUR = 3600
 DAY = 24*3600
 
 with open("127.0.0.1.crt","rb") as cert:
-    certificate = x509.load_pem_x509_certificate(cert.read())
+    SELF_CERTIFICATE = x509.load_pem_x509_certificate(cert.read())
 with open('privkey.pem','rb') as keyfile:
-    self_private_key = serialization.load_pem_private_key(keyfile.read(),password=None)
+    SELF_PRIVATE_KEY = serialization.load_pem_private_key(keyfile.read(),password=None)
 
 cipherposs = {'AES-256':ciphers.algorithms.AES,'Camellia-256':ciphers.algorithms.Camellia}
 modeposs = {'CBC':ciphers.modes.CBC,'CFB':ciphers.modes.CFB,'OFB':ciphers.modes.OFB}
@@ -77,6 +78,7 @@ class MediaServer(resource.Resource):
         #TODO: ENCRYPT WITH OUR PRIVATE KEY
         return (user+"\n").encode('latin')+sendable_public_key.public_bytes(encoding=serialization.Encoding.PEM,format=serialization.PublicFormat.SubjectPublicKeyInfo)
 
+
     def do_get_protocols(self,request):
         data = request.content.read()
         secret = data[0:32]
@@ -96,9 +98,17 @@ class MediaServer(resource.Resource):
         modechoice = choice(modes)
         protocol+=modechoice+"_"
         digestchoice = choice(digestposs)
-        protocol+=digestchoice
-        #TODO: ALSO SEND OUR CERTIFICATE
-        return protocol.encode('latin')
+        
+        if digestchoice =='SHA-256':
+            hashf = hashes.SHA256()
+        elif digestchoice=='SHA3-256':
+            hashf = hashes.SHA3_256()
+        
+        protocol+=digestchoice+"\n"
+        
+
+        encrypted_secret = SELF_PRIVATE_KEY.sign(secret,asympad.PSS(mgf= asympad.MGF1(hashf),salt_length=asympad.PSS.MAX_LENGTH),hashf)
+        return protocol.encode('latin')+SELF_CERTIFICATE.public_bytes(encoding=serialization.Encoding.PEM)+encrypted_secret
 
     # Send the list of media files to clients
     def do_list(self, request):
