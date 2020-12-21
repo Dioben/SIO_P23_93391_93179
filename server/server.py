@@ -78,21 +78,24 @@ class MediaServer(resource.Resource):
         return (user+"\n").encode('latin')+sendable_public_key.public_bytes(encoding=serialization.Encoding.PEM,format=serialization.PublicFormat.SubjectPublicKeyInfo)
 
     def do_get_protocols(self,request):
+        data = request.content.read()
+        secret = data[0:32]
+        protocolmap = json.loads(data[32::])
         protocol = 'TLS_ECHDE_RSA_'
-        ciphers = [x for x in request.args[b'ciphers'] if x.decode('latin') in cipherposs.keys()]
+        ciphers = [x for x in protocolmap['ciphers'] if x in cipherposs.keys()]
         if ciphers ==[]:
             return b'No available ciphers'
-        digestposs = [x for x in request.args[b'digests'] if x.decode('latin') in digests.keys()]
+        digestposs = [x for x in protocolmap['digests'] if x in digests.keys()]
         if digestposs==[]:
             return b'No available digests'
-        modes = [x for x in request.args[b'modes'] if x.decode('latin') in modeposs.keys()]
+        modes = [x for x in protocolmap['modes'] if x in modeposs.keys()]
         if modes==[]:
             return b'No available modes'
-        cipherchoice = choice(ciphers).decode('latin')
+        cipherchoice = choice(ciphers)
         protocol+="WITH_"+cipherchoice+"_"
-        modechoice = choice(modes).decode('latin')
+        modechoice = choice(modes)
         protocol+=modechoice+"_"
-        digestchoice = choice(digestposs).decode('latin')
+        digestchoice = choice(digestposs)
         protocol+=digestchoice
         #TODO: ALSO SEND OUR CERTIFICATE
         return protocol.encode('latin')
@@ -233,10 +236,7 @@ class MediaServer(resource.Resource):
         logger.debug(f'Received request for {request.uri}')
 
         try:
-            if request.path == b'/api/protocols':
-                return self.do_get_protocols(request)
-
-            elif request.path == b'/api/list':
+            if request.path == b'/api/list':
                 return self.do_list(request)
 
             elif request.path == b'/api/download':
@@ -258,6 +258,8 @@ class MediaServer(resource.Resource):
             return self.do_key_set(request)
         elif request.path == 'api/auth':
             return self.try_auth(request)
+        elif request.path == b'/api/protocols':
+                return self.do_get_protocols(request)
         request.setResponseCode(501)
         return b''
 
