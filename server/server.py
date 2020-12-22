@@ -16,8 +16,6 @@ import uuid
 from time import time
 from cryptography import x509
 
-userkeys= {}
-licenses = {'mike':5}
 logger = logging.getLogger('root')
 FORMAT = "[%(filename)s:%(lineno)s - %(funcName)20s() ] %(message)s"
 logging.basicConfig(format=FORMAT)
@@ -27,11 +25,10 @@ HOUR = 3600
 DAY = 24*3600
 
 with open("127.0.0.1.crt","rb") as cert:
-    SELF_CERTIFICATE = x509.load_pem_x509_certificate(cert.read())
+    certpem = cert.read()
+    SELF_CERTIFICATE = x509.load_pem_x509_certificate(certpem)
 with open('privkey.pem','rb') as keyfile:
     SELF_PRIVATE_KEY = serialization.load_pem_private_key(keyfile.read(),password=None)
-
-print(SELF_PRIVATE_KEY.public_key()==SELF_CERTIFICATE.public_key)
 
 cipherposs = {'AES-256':ciphers.algorithms.AES,'Camellia-256':ciphers.algorithms.Camellia}
 modeposs = {'CBC':ciphers.modes.CBC,'CFB':ciphers.modes.CFB,'OFB':ciphers.modes.OFB}
@@ -42,7 +39,6 @@ HASHES={0:hashes.SHA256,1:hashes.SHA3_256}
 CIPHERS={(0).to_bytes(1,"big"):'AES-256',(1).to_bytes(1,"big"):'Camellia-256'}         
 MODES = {(0).to_bytes(1,"big"):'CBC',(1).to_bytes(1,"big"):'CFB',(2).to_bytes(1,"big"):'OFB'}
 
-keys= {}
 licenses = {}
 CATALOG = { '898a08080d1840793122b7e118b27a95d117ebce': 
             {
@@ -88,13 +84,13 @@ class MediaServer(resource.Resource):
         protocol = 'TLS_ECHDE_RSA_'
         ciphers = [x for x in protocolmap['ciphers'] if x in cipherposs.keys()]
         if ciphers ==[]:
-            return b'No available ciphers'
+            protocol='No available ciphers'
         digestposs = [x for x in protocolmap['digests'] if x in digests.keys()]
         if digestposs==[]:
-            return b'No available digests'
+            protocol='No available digests'
         modes = [x for x in protocolmap['modes'] if x in modeposs.keys()]
         if modes==[]:
-            return b'No available modes'
+            protocol='No available modes'
         cipherchoice = choice(ciphers)
         protocol+="WITH_"+cipherchoice+"_"
         modechoice = choice(modes)
@@ -102,14 +98,21 @@ class MediaServer(resource.Resource):
         digestchoice = choice(digestposs)
         
         if digestchoice =='SHA-256':
-            hashf = hashes.SHA256()
+            hashf = hashes.SHA256
         elif digestchoice=='SHA3-256':
-            hashf = hashes.SHA3_256()
+            hashf = hashes.SHA3_256
         
         protocol+=digestchoice+"\n"
-        
-        encrypted_secret = SELF_PRIVATE_KEY.sign(secret,asympad.PSS(mgf= asympad.MGF1(hashf),salt_length=asympad.PSS.MAX_LENGTH),hashf)
-        return protocol.encode('latin')+SELF_CERTIFICATE.public_bytes(encoding=serialization.Encoding.PEM)+encrypted_secret
+
+        encrypted_secret = SELF_PRIVATE_KEY.sign(
+            secret,
+            asympad.PSS(
+                mgf= asympad.MGF1(hashf()),
+                salt_length=asympad.PSS.MAX_LENGTH
+                ),
+                hashf())
+        msg = protocol.encode('latin')+certpem+encrypted_secret
+        return msg
 
     # Send the list of media files to clients
     def do_list(self, request):
