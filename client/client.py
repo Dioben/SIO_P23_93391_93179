@@ -101,7 +101,6 @@ def main():
                                                                                                                                 #so that people cant confuse server
                                                                                                                                 #by setting a new suite while impersonating
     #AT THIS POINT SERVER HAS BEEN VERIFIED, IT IS OUR TURN
-
     citizen_private_key = citizencardsession.findObjects([(PyKCS11.CKA_CLASS, PyKCS11.CKO_PRIVATE_KEY),(PyKCS11.CKA_LABEL, 'CITIZEN AUTHENTICATION KEY')])[0]
     mechanism = PyKCS11.Mechanism(PyKCS11.CKM_SHA256_RSA_PKCS,None) #BASICALLY MANDATORY, IT'S EITHER SHA 2 OR SHA 1/MD5 WHICH ARENT TRUSTWORTHY
     
@@ -129,7 +128,8 @@ def main():
     certdata = padder.update(SELF_CERTIFICATE.public_bytes(encoding=serialization.Encoding.PEM))+padder.finalize()
     encryptor = encryptor.encryptor()
     certdata = encryptor.update(certdata)+encryptor.finalize()
-    #print(certdata)
+    signature = bytes(citizencardsession.sign(citizen_private_key, serverID, mechanism))
+    print(len(signature))
     req = s.post(f'{SERVER_URL}/api/auth',data=iv+certdata)
     print(req.content)
     req = s.get(f'{SERVER_URL}/api/list')

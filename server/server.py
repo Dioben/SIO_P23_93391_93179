@@ -234,12 +234,13 @@ class MediaServer(resource.Resource):
         key = keys[request.getHeader(b'id')][0]
         unpadder = padder = padding.PKCS7(256).unpadder()
         decryptor = ciphers.Cipher(cipherposs[algo](key),modeposs[mode](iv)).decryptor()
-        cert = decryptor.update(data[16:])+decryptor.finalize()
+        cert = decryptor.update(data[16:-384])+decryptor.finalize()
         cert = unpadder.update(cert)+unpadder.finalize()
         cert = x509.load_pem_x509_certificate(cert)
-        print(cert)
+        sig = data[-384:]
+        cert.public_key().verify(sig,request.getHeader(b'ID'),asympad.PSS(mgf=asympad.MGF1(hashes.SHA256()),salt_length=asympad.PSS.MAX_LENGTH),hashes.SHA256())
         licensekey = os.urandom(256) 
-        licenses[request.getHeader(b'ID')]=(key,key,time()+HOUR) #this should  be PUBLIC KEY - LICENSE - EXPIRE TIME
+        licenses[request.getHeader(b'ID')]=(cert.public_key(),key,time()+HOUR) #this should  be PUBLIC KEY - LICENSE - EXPIRE TIME
         return key
 
 
