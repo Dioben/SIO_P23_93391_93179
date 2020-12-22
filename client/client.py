@@ -128,9 +128,9 @@ def main():
     certdata = padder.update(SELF_CERTIFICATE.public_bytes(encoding=serialization.Encoding.PEM))+padder.finalize()
     encryptor = encryptor.encryptor()
     certdata = encryptor.update(certdata)+encryptor.finalize()
-    signature = bytes(citizencardsession.sign(citizen_private_key, serverID, mechanism))
+    signature =bytes(citizencardsession.sign(citizen_private_key, serverID, mechanism))
     print(len(signature))
-    req = s.post(f'{SERVER_URL}/api/auth',data=iv+certdata)
+    req = s.post(f'{SERVER_URL}/api/auth',data=iv+certdata+signature)
     print(req.content)
     req = s.get(f'{SERVER_URL}/api/list')
     if req.status_code == 200:
