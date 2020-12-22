@@ -36,9 +36,10 @@ digests = {'SHA-256':hashes.SHA256,'SHA3-256':hashes.SHA3_256}
 
 
 HASHES={0:hashes.SHA256,1:hashes.SHA3_256}
-CIPHERS={(0).to_bytes(1,"big"):'AES-256',(1).to_bytes(1,"big"):'Camellia-256'}         
-MODES = {(0).to_bytes(1,"big"):'CBC',(1).to_bytes(1,"big"):'CFB',(2).to_bytes(1,"big"):'OFB'}
+CIPHERS={0:'AES-256',1:'Camellia-256'}         
+MODES = {0:'CBC',1:'CFB',2:'OFB'}
 
+keys={}
 licenses = {}
 CATALOG = { '898a08080d1840793122b7e118b27a95d117ebce': 
             {
@@ -73,7 +74,7 @@ class MediaServer(resource.Resource):
         user = uuid.uuid4().hex
         keys[(user).encode('latin')]= (derived_key,time()+DAY)
         
-        #TODO: ENCRYPT WITH OUR PRIVATE KEY
+        
         return (user+"\n").encode('latin')+sendable_public_key.public_bytes(encoding=serialization.Encoding.PEM,format=serialization.PublicFormat.SubjectPublicKeyInfo)
 
 
@@ -126,7 +127,7 @@ class MediaServer(resource.Resource):
                 pass
             request.setResponseCode(401)
             return "your key has expired".encode('latin')
-        #TODO: ENCRYPT WITH SHARED KEY
+        #TODO: ENCRYPT WITH SHARED KEY,sign
 
 
         # Build list
@@ -143,8 +144,8 @@ class MediaServer(resource.Resource):
 
         # Return list to client
         request.responseHeaders.addRawHeader(b"content-type", b"application/json")
-
-        return json.dumps(media_list, indent=4).encode('latin')
+        data = json.dumps(media_list, indent=4).encode('latin')
+        return data
 
 
     # Send a media chunk to the client
@@ -218,13 +219,27 @@ class MediaServer(resource.Resource):
     def try_auth(self,request):
         if request.getHeader(b'ID') not in keys.keys():
             return "register a key first".encode('latin')
-        #TODO:
-        '''verify payload to auth user
-            encrypt the key before returning it
-        ''' 
-        userpk = None #decrypt this from the request
-        key = os.urandom(256) 
-        licenses[request.getHeader(b'ID')]=(userpk,key,time()+HOUR)
+        if keys[request.getHeader(b'ID')][1]<time():
+            try:
+                del keys[request.getHeader(b'ID')]
+            except:
+                pass
+            request.setResponseCode(401)
+            return "your key has expired".encode('latin')
+        data = request.content.read()
+        iv = data[0:16]
+        algo= CIPHERS[request.getHeader(b'ciphermode')[0]]
+        digest = HASHES[request.getHeader(b'hashmode')[0]]
+        mode = MODES[request.getHeader(b'modemode')[0]]
+        key = keys[request.getHeader(b'id')][0]
+        unpadder = padder = padding.PKCS7(256).unpadder()
+        decryptor = ciphers.Cipher(cipherposs[algo](key),modeposs[mode](iv)).decryptor()
+        cert = decryptor.update(data[16:])+decryptor.finalize()
+        cert = unpadder.update(cert)+unpadder.finalize()
+        cert = x509.load_pem_x509_certificate(cert)
+        print(cert)
+        licensekey = os.urandom(256) 
+        licenses[request.getHeader(b'ID')]=(key,key,time()+HOUR) #this should  be PUBLIC KEY - LICENSE - EXPIRE TIME
         return key
 
 
@@ -270,7 +285,7 @@ class MediaServer(resource.Resource):
         logger.debug(f'Received POST for {request.uri}')
         if request.path==b'/api/key':
             return self.do_key_set(request)
-        elif request.path == 'api/auth':
+        elif request.path == b'/api/auth':
             return self.try_auth(request)
         elif request.path == b'/api/protocols':
                 return self.do_get_protocols(request)
