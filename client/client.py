@@ -9,7 +9,7 @@ import datetime
 import sys
 import PyKCS11
 import getpass
-from cryptography.hazmat.primitives import ciphers,hashes,serialization
+from cryptography.hazmat.primitives import ciphers,hashes,serialization,padding
 from random import choice
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
@@ -75,7 +75,7 @@ def main():
     suite = req.text.split("\n",1)[0]
     info = suite.split("_")
     cipherstring =info[4]
-    cipher = cipherposs[cipherstring]
+    cipherobj = cipherposs[cipherstring]
     
     modestring=info[5]
     mode = modeposs[modestring]
@@ -109,18 +109,29 @@ def main():
   
     #Diffie-Hellman setup- using ephemeral elliptic for max performance/safety
     salt = os.urandom(32)
-    
     private_key = ec.generate_private_key(ec.SECP384R1())
     sendable_public_key = private_key.public_key()
-    payload = sendable_public_key.public_bytes(encoding=serialization.Encoding.PEM,format=serialization.PublicFormat.SubjectPublicKeyInfo)
-    
-    req = s.post(f'{SERVER_URL}/api/key',data=salt+payload)
+    payload = salt+sendable_public_key.public_bytes(encoding=serialization.Encoding.PEM,format=serialization.PublicFormat.SubjectPublicKeyInfo)
+   
+    req = s.post(f'{SERVER_URL}/api/key',data=payload)
     serverID = req.content.split(b"\n",1)[0].decode('latin')
+
     peer_public_key = req.content.split(b"\n",1)[1]
     peer_public_key = serialization.load_pem_public_key(peer_public_key)
     shared_key = private_key.exchange(ec.ECDH(), peer_public_key)
     derived_key = HKDF(algorithm=hashfunc(),length=32,salt=salt,info=None).derive(shared_key)
     s.headers.update({'ID':serverID})
+
+    #TODO:SEND OUR CERTIFICATE OVER
+    iv = os.urandom(16)
+    encryptor = ciphers.Cipher(cipherobj(derived_key),mode(iv))
+    padder = padding.PKCS7(256).padder()
+    certdata = padder.update(SELF_CERTIFICATE.public_bytes(encoding=serialization.Encoding.PEM))+padder.finalize()
+    encryptor = encryptor.encryptor()
+    certdata = encryptor.update(certdata)+encryptor.finalize()
+    #print(certdata)
+    req = s.post(f'{SERVER_URL}/api/auth',data=iv+certdata)
+    print(req.content)
     req = s.get(f'{SERVER_URL}/api/list')
     if req.status_code == 200:
         print("Got Server List")
