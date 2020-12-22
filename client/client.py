@@ -33,9 +33,9 @@ lib = '/usr/local/lib/libpteidpkcs11.so'
 pkcs11 = PyKCS11.PyKCS11Lib()
 pkcs11.load(lib)
 with open("cert.der","rb") as cert:
-    certificate = x509.load_der_x509_certificate(cert.read())
+    SELF_CERTIFICATE = x509.load_der_x509_certificate(cert.read())
 date =datetime.datetime.now()
-if certificate.not_valid_before>date or date>certificate.not_valid_after:
+if SELF_CERTIFICATE.not_valid_before>date or date>SELF_CERTIFICATE.not_valid_after:
     print("expired cert ",certificate.public_key)
     sys.exit(0)
 logger = logging.getLogger('root')
@@ -58,7 +58,7 @@ def main():
     # Get a list of media files
     print("Contacting Server")
    
-    # TODO: Secure the session , load our keys all the way up here
+    # TODO: Secure the session
     s = requests.Session()
     
     protocolmap = {
@@ -84,25 +84,29 @@ def main():
     hashfunc = digests[digeststring]
 
     print("chose ",cipherstring,modestring,digeststring)
-
-    servercert = req.content.split(b"\n",1)[1].split(b"\n-----END CERTIFICATE-----\n")[0]+b"\n-----END CERTIFICATE-----\n"
+    servercert = req.content.split(b"\n",1)[1].split(b"\n-----END CERTIFICATE-----\n")[0] +b"\n-----END CERTIFICATE-----\n"
     proof =req.content.split(b"\n-----END CERTIFICATE-----\n")[1]
     servercert = x509.load_pem_x509_certificate(servercert)
     date =datetime.datetime.now()
-    if certificate.not_valid_before>date or date>certificate.not_valid_after:
-        print("expired cert ",certificate.public_key)
+    
+    if servercert.not_valid_before>date or date>servercert.not_valid_after:
+        print("Expired server cert ",servercert.not_valid_before," - ",servercert.not_valid_after)
         return
-    print(certificate.public_key())
-    certificate.public_key().verify(proof,certsecret,asympad.PSS(mgf=asympad.MGF1(hashfunc()),salt_length=asympad.PSS.MAX_LENGTH),hashfunc())
 
+    server_public_key = servercert.public_key()
+    server_public_key.verify(proof,certsecret,asympad.PSS(mgf=asympad.MGF1(hashfunc()),salt_length=asympad.PSS.MAX_LENGTH),hashfunc())
+
+
+    s.headers.update({'hashmode':encodings[digeststring],'ciphermode':encodings[cipherstring],'modemode':encodings[modestring]})#putting these in
+                                                                                                                                #so that people cant confuse server
+                                                                                                                                #by setting a new suite while impersonating
+    #AT THIS POINT SERVER HAS BEEN VERIFIED, IT IS OUR TURN
 
     citizen_private_key = citizencardsession.findObjects([(PyKCS11.CKA_CLASS, PyKCS11.CKO_PRIVATE_KEY),(PyKCS11.CKA_LABEL, 'CITIZEN AUTHENTICATION KEY')])[0]
     mechanism = PyKCS11.Mechanism(PyKCS11.CKM_SHA256_RSA_PKCS,None) #BASICALLY MANDATORY, IT'S EITHER SHA 2 OR SHA 1/MD5 WHICH ARENT TRUSTWORTHY
     
     
-    s.headers.update({'hashmode':encodings[digeststring],'ciphermode':encodings[cipherstring],'modemode':encodings[modestring]})#putting these in
-                                                                                                                                #so that people cant confuse server
-                                                                                                                                #by setting a new suite while impersonating
+  
     #Diffie-Hellman setup- using ephemeral elliptic for max performance/safety
     salt = os.urandom(32)
     
