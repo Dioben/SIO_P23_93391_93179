@@ -100,9 +100,7 @@ def main():
     s.headers.update({'hashmode':encodings[digeststring],'ciphermode':encodings[cipherstring],'modemode':encodings[modestring]})#putting these in
                                                                                                                                 #so that people cant confuse server
                                                                                                                                 #by setting a new suite while impersonating
-    #AT THIS POINT SERVER HAS BEEN VERIFIED, IT IS OUR TURN
-    citizen_private_key = citizencardsession.findObjects([(PyKCS11.CKA_CLASS, PyKCS11.CKO_PRIVATE_KEY),(PyKCS11.CKA_LABEL, 'CITIZEN AUTHENTICATION KEY')])[0]
-    mechanism = PyKCS11.Mechanism(PyKCS11.CKM_SHA256_RSA_PKCS,None) #BASICALLY MANDATORY, IT'S EITHER SHA 2 OR SHA 1/MD5 WHICH ARENT TRUSTWORTHY
+    #AT THIS POINT SERVER HAS BEEN VERIFIED, WE'VE STILL GOTTA DO IT
     
     
   
@@ -121,17 +119,18 @@ def main():
     derived_key = HKDF(algorithm=hashfunc(),length=32,salt=salt,info=None).derive(shared_key)
     s.headers.update({'ID':serverID})
 
-    #TODO:SEND OUR CERTIFICATE OVER
+    #TODO:make the signature check work
     iv = os.urandom(16)
     encryptor = ciphers.Cipher(cipherobj(derived_key),mode(iv))
     padder = padding.PKCS7(256).padder()
     certdata = padder.update(SELF_CERTIFICATE.public_bytes(encoding=serialization.Encoding.PEM))+padder.finalize()
     encryptor = encryptor.encryptor()
     certdata = encryptor.update(certdata)+encryptor.finalize()
+
+    citizen_private_key = citizencardsession.findObjects([(PyKCS11.CKA_CLASS, PyKCS11.CKO_PRIVATE_KEY),(PyKCS11.CKA_LABEL, 'CITIZEN AUTHENTICATION KEY')])[0]
+    mechanism = PyKCS11.Mechanism(PyKCS11.CKM_SHA256_RSA_PKCS,None) #BASICALLY MANDATORY, IT'S EITHER SHA 2 OR SHA 1/MD5 WHICH ARENT TRUSTWORTHY
     signature =bytes(citizencardsession.sign(citizen_private_key, serverID, mechanism))
-    print(len(signature))
     req = s.post(f'{SERVER_URL}/api/auth',data=iv+certdata+signature)
-    print(req.content)
     req = s.get(f'{SERVER_URL}/api/list')
     if req.status_code == 200:
         print("Got Server List")
