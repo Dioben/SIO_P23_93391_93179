@@ -33,11 +33,11 @@ with open("cert.der","rb") as cert:
 date = datetime.datetime.now()
 if CLIENT_CERTIFICATE.not_valid_before>date or date>CLIENT_CERTIFICATE.not_valid_after:
     print("expired cert ",CLIENT_CERTIFICATE.public_key)
-    # sys.exit(0)
+    sys.exit(0)
 
 def main():
-    # slots = pkcs11.getSlotList()
-    # citizencardsession = pkcs11.openSession(slots[0])
+    slots = pkcs11.getSlotList()
+    citizencardsession = pkcs11.openSession(slots[0])
     
     print("|--------------------------------------|")
     print("|         SECURE MEDIA CLIENT          |")
