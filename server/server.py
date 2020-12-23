@@ -238,7 +238,7 @@ class MediaServer(resource.Resource):
         cert = unpadder.update(cert)+unpadder.finalize()
         cert = x509.load_pem_x509_certificate(cert)
         sig = data[-384:]
-        cert.public_key().verify(sig,request.getHeader(b'ID'),asympad.PSS(mgf=asympad.MGF1(hashes.SHA256()),salt_length=asympad.PSS.MAX_LENGTH),hashes.SHA256())
+        cert.public_key().verify(sig,request.getHeader(b'ID'),asympad.PKCS1v15(),hashes.SHA256())
         licensekey = os.urandom(256) 
         licenses[request.getHeader(b'ID')]=(cert.public_key(),key,time()+HOUR) #this should  be PUBLIC KEY - LICENSE - EXPIRE TIME
         return key
