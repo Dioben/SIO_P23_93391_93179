@@ -7,7 +7,7 @@ import binascii
 import json
 import os
 import math
-from cryptography.hazmat.primitives import ciphers,hashes,serialization,padding
+from cryptography.hazmat.primitives import ciphers,hashes,serialization,padding,hmac
 from random import choice
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
@@ -157,8 +157,6 @@ class MediaServer(resource.Resource):
                 pass
             request.setResponseCode(401)
             return "your key has expired".encode('latin')
-        #TODO: ENCRYPT WITH SHARED KEY,sign
-
 
         # Build list
         media_list = []
@@ -175,7 +173,24 @@ class MediaServer(resource.Resource):
         # Return list to client
         request.responseHeaders.addRawHeader(b"content-type", b"application/json")
         data = json.dumps(media_list, indent=4).encode('latin')
-        return data
+
+        CIPHER = cipher_suites.CIPHERS[request.getHeader(b'suite_cipher')[0]]
+        MODE = cipher_suites.MODES[request.getHeader(b'suite_mode')[0]]
+        HASH = cipher_suites.HASHES[request.getHeader(b'suite_hash')[0]]
+        server_ratchet_send_key, salt = ids_info[request.getHeader(b'id')][1], ids_info[request.getHeader(b'id')][2]
+        server_ratchet_send_key, server_send_key, server_send_iv = ratchet_next(server_ratchet_send_key, HASH, salt)
+        ids_info[request.getHeader(b'id')][1] = server_ratchet_send_key
+
+        # Encrypt data with server_send_key and HMAC it
+        encryptor = ciphers.Cipher(CIPHER(server_send_key),MODE(server_send_iv)).encryptor()
+        padder = padding.PKCS7(256).padder()
+        encrypted_data = padder.update(data)+padder.finalize()
+        encrypted_data = encryptor.update(encrypted_data)+encryptor.finalize()
+        server_data_hmac = hmac.HMAC(server_send_key, HASH())
+        server_data_hmac.update(encrypted_data)
+        server_data_hmac = server_data_hmac.finalize() # Has to send finalize because only bytes can be sent (is then compared with client's finalize)
+
+        return encrypted_data+('\n\n\n\n\n').encode('latin')+server_data_hmac # May be better to find another way to separate encrypted_data and server_data_hmac
 
 
     # Send a media chunk to the client
