@@ -15,29 +15,8 @@ from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 from cryptography import x509
 from cryptography.hazmat.primitives.asymmetric import padding as asympad
+import cipher_suites
 
-#consider moving these into a shared file
-cipherposs = {'AES-256':ciphers.algorithms.AES,'Camellia-256':ciphers.algorithms.Camellia}
-modeposs = {'CBC':ciphers.modes.CBC,'CFB':ciphers.modes.CFB,'OFB':ciphers.modes.OFB}
-digests = {'SHA-256':hashes.SHA256,'SHA3-256':hashes.SHA3_256}
-encodings = {'AES-256':(0).to_bytes(1,"big"),
-             'Camellia-256':(1).to_bytes(1,"big"),
-             'CBC':(0).to_bytes(1,"big"),
-             'CFB':(1).to_bytes(1,"big"),
-             'OFB':(2).to_bytes(1,"big"),
-             'SHA-256':(0).to_bytes(1,"big"),
-             'SHA3-256':(1).to_bytes(1,"big")}
-
-
-lib = '/usr/local/lib/libpteidpkcs11.so'
-pkcs11 = PyKCS11.PyKCS11Lib()
-pkcs11.load(lib)
-with open("cert.der","rb") as cert:
-    SELF_CERTIFICATE = x509.load_der_x509_certificate(cert.read())
-date =datetime.datetime.now()
-if SELF_CERTIFICATE.not_valid_before>date or date>SELF_CERTIFICATE.not_valid_after:
-    print("expired cert ",certificate.public_key)
-    sys.exit(0)
 logger = logging.getLogger('root')
 FORMAT = "[%(filename)s:%(lineno)s - %(funcName)20s() ] %(message)s"
 logging.basicConfig(format=FORMAT)
@@ -45,11 +24,20 @@ logger.setLevel(logging.INFO)
 
 SERVER_URL = 'http://127.0.0.1:8080'
 
-def main():
+# Load the client's hardware identification (citizen card)
+lib = '/usr/local/lib/libpteidpkcs11.so'
+pkcs11 = PyKCS11.PyKCS11Lib()
+pkcs11.load(lib)
+with open("cert.der","rb") as cert:
+    CLIENT_CERTIFICATE = x509.load_der_x509_certificate(cert.read())
+date = datetime.datetime.now()
+if CLIENT_CERTIFICATE.not_valid_before>date or date>CLIENT_CERTIFICATE.not_valid_after:
+    print("expired cert ",CLIENT_CERTIFICATE.public_key)
+    sys.exit(0)
+slots = pkcs11.getSlotList()
+citizen_card_session = pkcs11.openSession(slots[0])
 
-    
-    slots = pkcs11.getSlotList()
-    citizencardsession = pkcs11.openSession(slots[0])
+def main():
     
     print("|--------------------------------------|")
     print("|         SECURE MEDIA CLIENT          |")
@@ -60,84 +48,89 @@ def main():
    
     # TODO: Secure the session
     s = requests.Session()
-    
-    protocolmap = {
-            'ciphers':['AES-256','Camellia-256'],
-            'digests':['SHA-256','SHA3-256'],
-            'modes':['CBC','CFB','OFB'],
-        }
 
-    certsecret= os.urandom(32)
-    req = s.post(f'{SERVER_URL}/api/protocols',data = certsecret+json.dumps(protocolmap).encode('latin'))
+    # Finds 3 random possible protocol/cipher suite possibilities and a client random (random 32 bytes)
+    protocol_list = list(cipher_suites.getCipherSuiteList(3))
+    client_random = os.urandom(32)
+    
+    # Sends the protocol_list and client random to the server at /protocols
+    req = s.post(f'{SERVER_URL}/api/protocols', data = client_random+json.dumps(protocol_list).encode('latin'))
     if req.status_code==200:
         print("Got Protocol List")
-    
-    suite = req.text.split("\n",1)[0]
-    info = suite.split("_")
-    cipherstring =info[4]
-    cipherobj = cipherposs[cipherstring]
-    
-    modestring=info[5]
-    mode = modeposs[modestring]
-    
-    digeststring =info[6]
-    hashfunc = digests[digeststring]
 
-    print("chose ",cipherstring,modestring,digeststring)
-    servercert = req.content.split(b"\n",1)[1].split(b"\n-----END CERTIFICATE-----\n")[0] +b"\n-----END CERTIFICATE-----\n"
-    proof =req.content.split(b"\n-----END CERTIFICATE-----\n")[1]
-    servercert = x509.load_pem_x509_certificate(servercert)
-    date =datetime.datetime.now()
-    
-    if servercert.not_valid_before>date or date>servercert.not_valid_after:
-        print("Expired server cert ",servercert.not_valid_before," - ",servercert.not_valid_after)
+    # Server returns the protocol/cipher suite it chose
+    cipher_suite = req.text.split('\n',1)[0].split('_')
+    print("cipher suite:", cipher_suite)
+    CIPHER = cipher_suites.CIPHERS[cipher_suites.cs_indexes[cipher_suite[3]]]
+    MODE = cipher_suites.MODES[cipher_suites.cs_indexes[cipher_suite[4]]]
+    HASH = cipher_suites.HASHES[cipher_suites.cs_indexes[cipher_suite[5]]]
+
+    # Server returns the server's certificate and the client random signed by the server
+    print("chose ",CIPHER, MODE, HASH)
+    SERVER_CERTIFICATE = req.content.split(b"\n",1)[1].split(b"\n-----END CERTIFICATE-----\n")[0] +b"\n-----END CERTIFICATE-----\n"
+    signed_client_random = req.content.split(b"\n-----END CERTIFICATE-----\n")[1]
+    SERVER_CERTIFICATE = x509.load_pem_x509_certificate(SERVER_CERTIFICATE)
+
+    # Checks that the server's certificate is valid
+    date = datetime.datetime.now()
+    if SERVER_CERTIFICATE.not_valid_before>date or date>SERVER_CERTIFICATE.not_valid_after:
+        print("Expired server cert ",SERVER_CERTIFICATE.not_valid_before," - ",SERVER_CERTIFICATE.not_valid_after)
         return
 
-    server_public_key = servercert.public_key()
-    server_public_key.verify(proof,certsecret,asympad.PSS(mgf=asympad.MGF1(hashfunc()),salt_length=asympad.PSS.MAX_LENGTH),hashfunc())
+    # TODO: check certificate chain
 
+    # Checks that the server signed the client random successfully
+    server_public_key = SERVER_CERTIFICATE.public_key()
+    server_public_key.verify(signed_client_random,client_random,asympad.PSS(mgf=asympad.MGF1(HASH()),salt_length=asympad.PSS.MAX_LENGTH),HASH())
 
-    s.headers.update({'hashmode':encodings[digeststring],'ciphermode':encodings[cipherstring],'modemode':encodings[modestring]})#putting these in
-                                                                                                                                #so that people cant confuse server
-                                                                                                                                #by setting a new suite while impersonating
-    #AT THIS POINT SERVER HAS BEEN VERIFIED, WE'VE STILL GOTTA DO IT
+    # putting these in so that people cant confuse server by setting a new suite while impersonating
+    s.headers.update({
+        'suite_hash':(cipher_suites.cs_indexes[cipher_suite[5]]).to_bytes(1,"big"),
+        'suite_cipher':(cipher_suites.cs_indexes[cipher_suite[3]]).to_bytes(1,"big"),
+        'suite_mode':(cipher_suites.cs_indexes[cipher_suite[4]]).to_bytes(1,"big")})
     
+    # AT THIS POINT SERVER HAS BEEN VERIFIED, WE'VE STILL GOTTA DO IT
     
-  
-    #Diffie-Hellman setup- using ephemeral elliptic for max performance/safety
+    # Diffie-Hellman setup - using ephemeral elliptic for max performance/safety
+    # Send salt and client's DH parameter to the server at /key
     salt = os.urandom(32)
-    private_key = ec.generate_private_key(ec.SECP384R1())
-    sendable_public_key = private_key.public_key()
-    payload = salt+sendable_public_key.public_bytes(encoding=serialization.Encoding.PEM,format=serialization.PublicFormat.SubjectPublicKeyInfo)
-   
+    client_dh_private = ec.generate_private_key(ec.SECP384R1())
+    client_dh = client_dh_private.public_key()
+    payload = salt + client_dh.public_bytes(encoding=serialization.Encoding.PEM,format=serialization.PublicFormat.SubjectPublicKeyInfo)
     req = s.post(f'{SERVER_URL}/api/key',data=payload)
-    serverID = req.content.split(b"\n",1)[0].decode('latin')
 
-    peer_public_key = req.content.split(b"\n",1)[1]
-    peer_public_key = serialization.load_pem_public_key(peer_public_key)
-    shared_key = private_key.exchange(ec.ECDH(), peer_public_key)
-    derived_key = HKDF(algorithm=hashfunc(),length=32,salt=salt,info=None).derive(shared_key)
-    s.headers.update({'ID':serverID})
+    # Server returns the client's ID and the server's DH parameter
+    clientID = req.content.split(b"\n",1)[0].decode('latin')
+    s.headers.update({'id':clientID})
+    server_dh = req.content.split(b"\n",1)[1]
 
-    #TODO:make the signature check work
+    # Calculates shared key for further messaging
+    server_dh = serialization.load_pem_public_key(server_dh)
+    shared_key = client_dh_private.exchange(ec.ECDH(), server_dh)
+    derived_key = HKDF(algorithm=HASH(),length=32,salt=salt,info=None).derive(shared_key)
+
+    # TODO: make the signature check work
+    # Encrypts the client's certificate with the shared key
     iv = os.urandom(16)
-    encryptor = ciphers.Cipher(cipherobj(derived_key),mode(iv))
+    encryptor = ciphers.Cipher(CIPHER(derived_key),MODE(iv)).encryptor()
     padder = padding.PKCS7(256).padder()
-    certdata = padder.update(SELF_CERTIFICATE.public_bytes(encoding=serialization.Encoding.PEM))+padder.finalize()
-    encryptor = encryptor.encryptor()
-    certdata = encryptor.update(certdata)+encryptor.finalize()
+    encrypted_client_certificate = padder.update(CLIENT_CERTIFICATE.public_bytes(encoding=serialization.Encoding.PEM))+padder.finalize()
+    encrypted_client_certificate = encryptor.update(encrypted_client_certificate)+encryptor.finalize()
 
-    citizen_private_key = citizencardsession.findObjects([(PyKCS11.CKA_CLASS, PyKCS11.CKO_PRIVATE_KEY),(PyKCS11.CKA_LABEL, 'CITIZEN AUTHENTICATION KEY')])[0]
+    # Signs the clientID
+    citizen_card_private_key = citizen_card_session.findObjects([(PyKCS11.CKA_CLASS, PyKCS11.CKO_PRIVATE_KEY),(PyKCS11.CKA_LABEL, 'CITIZEN AUTHENTICATION KEY')])[0]
     mechanism = PyKCS11.Mechanism(PyKCS11.CKM_SHA256_RSA_PKCS,None) #BASICALLY MANDATORY, IT'S EITHER SHA 2 OR SHA 1/MD5 WHICH ARENT TRUSTWORTHY
-    signature =bytes(citizencardsession.sign(citizen_private_key, serverID, mechanism))
-    req = s.post(f'{SERVER_URL}/api/auth',data=iv+certdata+signature)
+    client_signature = bytes(citizen_card_session.sign(citizen_card_private_key, clientID, mechanism))
+    
+    # Sends an iv, the encrypted client's certificate and the signed clientID to the server at /auth
+    req = s.post(f'{SERVER_URL}/api/auth',data=iv+encrypted_client_certificate+client_signature)
+    
+    # Gets list of musics from the server
     req = s.get(f'{SERVER_URL}/api/list')
     if req.status_code == 200:
         print("Got Server List")
     media_list = req.json()
 
-
-    
     # Present a simple selection menu    
     idx = 0
     print("MEDIA CATALOG\n")
