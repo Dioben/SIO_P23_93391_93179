@@ -9,7 +9,7 @@ import datetime
 import sys
 import PyKCS11
 import getpass
-from cryptography.hazmat.primitives import ciphers,hashes,serialization,padding
+from cryptography.hazmat.primitives import ciphers,hashes,serialization,padding,hmac
 from random import choice
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
@@ -33,7 +33,7 @@ with open("cert.der","rb") as cert:
 date = datetime.datetime.now()
 if CLIENT_CERTIFICATE.not_valid_before>date or date>CLIENT_CERTIFICATE.not_valid_after:
     print("expired cert ",CLIENT_CERTIFICATE.public_key)
-    sys.exit(0)
+    sys.exit(1)
 slots = pkcs11.getSlotList()
 citizen_card_session = pkcs11.openSession(slots[0])
 
@@ -122,8 +122,8 @@ def main():
 
     # TODO: make the signature check work
     # Encrypts the client's certificate with the shared key
-    client_ratchet_send_key, client_send_key, client_send_iv = ratchet_next(client_ratchet_key, HASH, salt)
-    encryptor = ciphers.Cipher(CIPHER(client_send_key),MODE(client_send_iv)).encryptor() # TODO: needs to activate send's ratchet after this
+    client_ratchet_send_key, client_send_key, client_send_iv = ratchet_next(client_ratchet_send_key, HASH, salt)
+    encryptor = ciphers.Cipher(CIPHER(client_send_key),MODE(client_send_iv)).encryptor()
     padder = padding.PKCS7(256).padder()
     encrypted_client_certificate = padder.update(CLIENT_CERTIFICATE.public_bytes(encoding=serialization.Encoding.PEM))+padder.finalize()
     encrypted_client_certificate = encryptor.update(encrypted_client_certificate)+encryptor.finalize()
@@ -140,7 +140,23 @@ def main():
     req = s.get(f'{SERVER_URL}/api/list')
     if req.status_code == 200:
         print("Got Server List")
-    media_list = req.json()
+    content = req.content
+    encrypted_data, server_data_hmac = content.split(b'\n\n\n\n\n')
+
+    client_ratchet_receive_key, client_receive_key, client_receive_iv = ratchet_next(client_ratchet_receive_key, HASH, salt)
+    client_data_hmac = hmac.HMAC(client_receive_key, HASH())
+    client_data_hmac.update(encrypted_data)
+    client_data_hmac = client_data_hmac.finalize()
+
+    if server_data_hmac != client_data_hmac:
+        print("Server List is corrupted")
+        sys.exit(1)
+
+    decryptor = ciphers.Cipher(CIPHER(client_receive_key), MODE(client_receive_iv)).decryptor()
+    unpadder = padding.PKCS7(256).unpadder()
+    encrypted_data = decryptor.update(encrypted_data)+decryptor.finalize()
+    data = unpadder.update(encrypted_data)+unpadder.finalize()
+    media_list = json.loads(data)
 
     # Present a simple selection menu    
     idx = 0
