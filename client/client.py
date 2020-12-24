@@ -149,7 +149,7 @@ def main():
     client_data_hmac = client_data_hmac.finalize()
 
     if server_data_hmac != client_data_hmac:
-        print("Server List is corrupted")
+        print("Server list is corrupted")
         sys.exit(1)
 
     decryptor = ciphers.Cipher(CIPHER(client_receive_key), MODE(client_receive_iv)).decryptor()
@@ -191,10 +191,28 @@ def main():
 
     # Get data from server and send it to the ffplay stdin through a pipe
     for chunk in range(media_item['chunks'] + 1):
-        req = requests.get(f'{SERVER_URL}/api/download?id={media_item["id"]}&chunk={chunk}')
-        chunk = req.json()
+        req = s.get(f'{SERVER_URL}/api/download?id={media_item["id"]}&chunk={chunk}')
+        content = req.content
        
-        # TODO: Process chunk
+        # TODO: Check when server return an error instead of a chunk
+
+        encrypted_data, server_data_hmac = content.split(b'\n\n\n\n\n')
+
+        client_ratchet_receive_key, client_receive_key, client_receive_iv = ratchet_next(client_ratchet_receive_key, HASH, salt)
+        client_data_hmac = hmac.HMAC(client_receive_key, HASH())
+        client_data_hmac.update(encrypted_data)
+        client_data_hmac = client_data_hmac.finalize()
+
+        if server_data_hmac != client_data_hmac:
+            print("Media chunk is corrupted")
+            proc.kill()
+            sys.exit(1)
+
+        decryptor = ciphers.Cipher(CIPHER(client_receive_key), MODE(client_receive_iv)).decryptor()
+        unpadder = padding.PKCS7(256).unpadder()
+        encrypted_data = decryptor.update(encrypted_data)+decryptor.finalize()
+        data = unpadder.update(encrypted_data)+unpadder.finalize()
+        chunk = json.loads(data)
 
         data = binascii.a2b_base64(chunk['data'].encode('latin'))
         try:
