@@ -55,7 +55,7 @@ HASHES={0:hashes.SHA256,1:hashes.SHA3_256}
 CIPHERS={0:'AES-256',1:'Camellia-256'}         
 MODES = {0:'CBC',1:'CFB',2:'OFB'}
 
-keys={}
+ids_info={}
 licenses = {}
 
 class MediaServer(resource.Resource):
@@ -101,17 +101,19 @@ class MediaServer(resource.Resource):
         derived_key = HKDF(algorithm= HASH(),length=32,salt=salt,info=None).derive(shared_key)
         
         clientID = uuid.uuid4().hex
-        keys[(clientID).encode('latin')]= (derived_key,time()+DAY)
+        ids_info[(clientID).encode('latin')] = (derived_key,time()+DAY)
         
         return (clientID+"\n").encode('latin')+server_dh.public_bytes(encoding=serialization.Encoding.PEM,format=serialization.PublicFormat.SubjectPublicKeyInfo)
 
 
     def do_auth(self,request):
-        if request.getHeader(b'ID') not in keys.keys():
+        """ Recieves an iv, the client's certificate and a client signature 
+            TODO: Finish this javadoc after i'm sure of what this function does """
+        if request.getHeader(b'id') not in ids_info.keys():
             return "register a key first".encode('latin')
-        if keys[request.getHeader(b'ID')][1]<time():
+        if ids_info[request.getHeader(b'id')][1]<time():
             try:
-                del keys[request.getHeader(b'ID')]
+                del ids_info[request.getHeader(b'id')]
             except:
                 pass
             request.setResponseCode(401)
@@ -121,27 +123,27 @@ class MediaServer(resource.Resource):
         CIPHER = cipher_suites.CIPHERS[request.getHeader(b'suite_cipher')[0]]
         MODE = cipher_suites.MODES[request.getHeader(b'suite_mode')[0]]
         HASH = cipher_suites.HASHES[request.getHeader(b'suite_hash')[0]]
-        key = keys[request.getHeader(b'id')][0]
+        derived_key = ids_info[request.getHeader(b'id')][0]
         unpadder = padder = padding.PKCS7(256).unpadder()
-        decryptor = ciphers.Cipher(CIPHER(key), MODE(iv)).decryptor()
-        cert = decryptor.update(data[16:-384])+decryptor.finalize()
-        cert = unpadder.update(cert)+unpadder.finalize()
-        cert = x509.load_pem_x509_certificate(cert)
-        sig = data[-384:]
-        cert.public_key().verify(sig,request.getHeader(b'ID'),asympad.PKCS1v15(),hashes.SHA256())
-        licensekey = os.urandom(256) 
-        licenses[request.getHeader(b'ID')]=(cert.public_key(),key,time()+HOUR) #this should  be PUBLIC KEY - LICENSE - EXPIRE TIME
-        return key
+        decryptor = ciphers.Cipher(CIPHER(derived_key), MODE(iv)).decryptor()
+        client_certificate = decryptor.update(data[16:-384])+decryptor.finalize()
+        client_certificate = unpadder.update(client_certificate)+unpadder.finalize()
+        client_certificate = x509.load_pem_x509_certificate(client_certificate)
+        client_signature = data[-384:]
+        client_certificate.public_key().verify(client_signature,request.getHeader(b'id'),asympad.PKCS1v15(),hashes.SHA256())
+        license_key = os.urandom(256) # TODO: unused
+        licenses[request.getHeader(b'id')]=(client_certificate.public_key(),derived_key,time()+HOUR) #this should  be PUBLIC KEY - LICENSE - EXPIRE TIME
+        return derived_key # TODO: this shouldnt be sending the derived key, right?
 
 
     # Send the list of media files to clients
     def do_list(self, request):
-        if request.getHeader(b'ID') not in keys.keys():
+        if request.getHeader(b'id') not in ids_info.keys():
             request.setResponseCode(401)
             return "register a key first".encode('latin')
-        if keys[request.getHeader(b'ID')][1]<time():
+        if ids_info[request.getHeader(b'id')][1]<time():
             try:
-                del keys[request.getHeader(b'ID')]
+                del ids_info[request.getHeader(b'id')]
             except:
                 pass
             request.setResponseCode(401)

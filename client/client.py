@@ -24,7 +24,7 @@ logger.setLevel(logging.INFO)
 
 SERVER_URL = 'http://127.0.0.1:8080'
 
-# Get the client's certificate
+# Load the client's hardware identification (citizen card)
 lib = '/usr/local/lib/libpteidpkcs11.so'
 pkcs11 = PyKCS11.PyKCS11Lib()
 pkcs11.load(lib)
@@ -34,10 +34,10 @@ date = datetime.datetime.now()
 if CLIENT_CERTIFICATE.not_valid_before>date or date>CLIENT_CERTIFICATE.not_valid_after:
     print("expired cert ",CLIENT_CERTIFICATE.public_key)
     sys.exit(0)
+slots = pkcs11.getSlotList()
+citizen_card_session = pkcs11.openSession(slots[0])
 
 def main():
-    slots = pkcs11.getSlotList()
-    citizencardsession = pkcs11.openSession(slots[0])
     
     print("|--------------------------------------|")
     print("|         SECURE MEDIA CLIENT          |")
@@ -49,23 +49,28 @@ def main():
     # TODO: Secure the session
     s = requests.Session()
 
+    # Finds 3 random possible protocol/cipher suite possibilities and a client random (random 32 bytes)
     protocol_list = list(cipher_suites.getCipherSuiteList(3))
     client_random = os.urandom(32)
+    # Sends the protocol_list and client random to the server at /protocols
     req = s.post(f'{SERVER_URL}/api/protocols', data = client_random+json.dumps(protocol_list).encode('latin'))
     if req.status_code==200:
         print("Got Protocol List")
 
+    # Saves what protocol/cipher suite the server chose and returned
     cipher_suite = req.text.split('\n',1)[0].split('_')
     print("cipher suite:", cipher_suite)
     CIPHER = cipher_suites.CIPHERS[cipher_suites.cs_indexes[cipher_suite[3]]]
     MODE = cipher_suites.MODES[cipher_suites.cs_indexes[cipher_suite[4]]]
     HASH = cipher_suites.HASHES[cipher_suites.cs_indexes[cipher_suite[5]]]
 
+    # Saves the server's certificate and the client random signed by the server which the server returned
     print("chose ",CIPHER, MODE, HASH)
     SERVER_CERTIFICATE = req.content.split(b"\n",1)[1].split(b"\n-----END CERTIFICATE-----\n")[0] +b"\n-----END CERTIFICATE-----\n"
     signed_client_random = req.content.split(b"\n-----END CERTIFICATE-----\n")[1]
     SERVER_CERTIFICATE = x509.load_pem_x509_certificate(SERVER_CERTIFICATE)
 
+    # Checks that the server's certificate is valid
     date = datetime.datetime.now()
     if SERVER_CERTIFICATE.not_valid_before>date or date>SERVER_CERTIFICATE.not_valid_after:
         print("Expired server cert ",SERVER_CERTIFICATE.not_valid_before," - ",SERVER_CERTIFICATE.not_valid_after)
@@ -73,6 +78,7 @@ def main():
 
     # TODO: check certificate chain
 
+    # Checks that the server signed the client random successfully
     server_public_key = SERVER_CERTIFICATE.public_key()
     server_public_key.verify(signed_client_random,client_random,asympad.PSS(mgf=asympad.MGF1(HASH()),salt_length=asympad.PSS.MAX_LENGTH),HASH())
 
@@ -102,18 +108,21 @@ def main():
 
     s.headers.update({'id':clientID})
 
-    #TODO:make the signature check work
+    # TODO: make the signature check work
+    # Encrypts the certificate with the shared key
     iv = os.urandom(16)
-    encryptor = ciphers.Cipher(CIPHER(derived_key),MODE(iv))
+    encryptor = ciphers.Cipher(CIPHER(derived_key),MODE(iv)).encryptor()
     padder = padding.PKCS7(256).padder()
-    certdata = padder.update(CLIENT_CERTIFICATE.public_bytes(encoding=serialization.Encoding.PEM))+padder.finalize()
-    encryptor = encryptor.encryptor()
-    certdata = encryptor.update(certdata)+encryptor.finalize()
+    encrypted_client_certificate = padder.update(CLIENT_CERTIFICATE.public_bytes(encoding=serialization.Encoding.PEM))+padder.finalize()
+    encrypted_client_certificate = encryptor.update(encrypted_client_certificate)+encryptor.finalize()
 
-    citizen_private_key = citizencardsession.findObjects([(PyKCS11.CKA_CLASS, PyKCS11.CKO_PRIVATE_KEY),(PyKCS11.CKA_LABEL, 'CITIZEN AUTHENTICATION KEY')])[0]
+    citizen_card_private_key = citizen_card_session.findObjects([(PyKCS11.CKA_CLASS, PyKCS11.CKO_PRIVATE_KEY),(PyKCS11.CKA_LABEL, 'CITIZEN AUTHENTICATION KEY')])[0]
     mechanism = PyKCS11.Mechanism(PyKCS11.CKM_SHA256_RSA_PKCS,None) #BASICALLY MANDATORY, IT'S EITHER SHA 2 OR SHA 1/MD5 WHICH ARENT TRUSTWORTHY
-    signature =bytes(citizencardsession.sign(citizen_private_key, clientID, mechanism))
-    req = s.post(f'{SERVER_URL}/api/auth',data=iv+certdata+signature)
+
+    # TODO: this is sending the private key, should it be doing this?
+    client_signature = bytes(citizen_card_session.sign(citizen_card_private_key, clientID, mechanism))
+    
+    req = s.post(f'{SERVER_URL}/api/auth',data=iv+encrypted_client_certificate+client_signature)
     
     
     req = s.get(f'{SERVER_URL}/api/list')
