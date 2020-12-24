@@ -36,7 +36,6 @@ CATALOG = { '898a08080d1840793122b7e118b27a95d117ebce':
 CATALOG_BASE = 'catalog'
 CHUNK_SIZE = 1024 * 4
 
-
 HOUR = 3600
 DAY = 24*3600
 
@@ -46,17 +45,15 @@ with open("127.0.0.1.crt","rb") as cert:
 with open('privkey.pem','rb') as keyfile:
     SERVER_PRIVATE_KEY = serialization.load_pem_private_key(keyfile.read(),password=None)
 
-cipherposs = {'AES-256':ciphers.algorithms.AES,'Camellia-256':ciphers.algorithms.Camellia}
-modeposs = {'CBC':ciphers.modes.CBC,'CFB':ciphers.modes.CFB,'OFB':ciphers.modes.OFB}
-digests = {'SHA-256':hashes.SHA256,'SHA3-256':hashes.SHA3_256}
-
-
-HASHES={0:hashes.SHA256,1:hashes.SHA3_256}
-CIPHERS={0:'AES-256',1:'Camellia-256'}         
-MODES = {0:'CBC',1:'CFB',2:'OFB'}
-
+# Contains entries: clientID<server_ratchet_receive_key,server_ratchet_send_key,salt,time_valid>
 ids_info={}
+
 licenses = {}
+
+def ratchet_next(ratchet_key, HASH, salt):
+    output = HKDF(algorithm=HASH(),length=80,salt=salt,info=None).derive(ratchet_key)
+    ratchet_key, cipher_key, iv = output[:32], output[32:64], output[64:]
+    return ratchet_key, cipher_key, iv
 
 class MediaServer(resource.Resource):
     isLeaf = True
@@ -88,7 +85,7 @@ class MediaServer(resource.Resource):
     def do_key(self,request):
         """ Gets salt (random bytes) and the client DH parameter (key used to find the shared key)
             Calculates shared key and saves the clientID and its time
-            Returns userId and the server DH parameter"""
+            Returns the clientID and the server DH parameter"""
         HASH = cipher_suites.HASHES[request.getHeader(b'suite_hash')[0]]
         data = request.content.read()
         salt = data[0:32]
@@ -98,20 +95,26 @@ class MediaServer(resource.Resource):
         server_dh_private = ec.generate_private_key(ec.SECP384R1())
         server_dh = server_dh_private.public_key()
         shared_key = server_dh_private.exchange(ec.ECDH(), client_dh)
-        derived_key = HKDF(algorithm= HASH(),length=32,salt=salt,info=None).derive(shared_key)
+        server_ratchet_key = HKDF(algorithm=HASH(),length=32,salt=salt,info=None).derive(shared_key)
+        server_ratchet_receive_key = server_ratchet_key
+        server_ratchet_key = HKDF(algorithm=HASH(),length=32,salt=salt,info=None).derive(server_ratchet_key)
+        server_ratchet_send_key = server_ratchet_key
+
+        # server_ratchet_receive_key, server_receive_key, server_receive_iv = ratchet_next(server_ratchet_receive_key, HASH, salt)
+        # server_ratchet_send_key, server_send_key, server_send_iv = ratchet_next(server_ratchet_send_key, HASH, salt)
         
         clientID = uuid.uuid4().hex
-        ids_info[(clientID).encode('latin')] = (derived_key,time()+DAY)
+        ids_info[(clientID).encode('latin')] = [server_ratchet_receive_key,server_ratchet_send_key,salt,time()+DAY]
         
         return (clientID+"\n").encode('latin')+server_dh.public_bytes(encoding=serialization.Encoding.PEM,format=serialization.PublicFormat.SubjectPublicKeyInfo)
 
 
     def do_auth(self,request):
-        """ Recieves an iv, the client's certificate and a client signature 
+        """ Recieves the client's certificate and a client signature 
             TODO: Finish this javadoc after i'm sure of what this function does """
         if request.getHeader(b'id') not in ids_info.keys():
             return "register a key first".encode('latin')
-        if ids_info[request.getHeader(b'id')][1]<time():
+        if ids_info[request.getHeader(b'id')][3]<time():
             try:
                 del ids_info[request.getHeader(b'id')]
             except:
@@ -119,21 +122,27 @@ class MediaServer(resource.Resource):
             request.setResponseCode(401)
             return "your key has expired".encode('latin')
         data = request.content.read()
-        iv = data[0:16]
         CIPHER = cipher_suites.CIPHERS[request.getHeader(b'suite_cipher')[0]]
         MODE = cipher_suites.MODES[request.getHeader(b'suite_mode')[0]]
         HASH = cipher_suites.HASHES[request.getHeader(b'suite_hash')[0]]
-        derived_key = ids_info[request.getHeader(b'id')][0]
+
+        server_ratchet_receive_key, salt = ids_info[request.getHeader(b'id')][0], ids_info[request.getHeader(b'id')][2]
+        server_ratchet_receive_key, server_receive_key, server_receive_iv = ratchet_next(server_ratchet_receive_key, HASH, salt)
+        ids_info[request.getHeader(b'id')][0] = server_ratchet_receive_key
+
         unpadder = padding.PKCS7(256).unpadder()
-        decryptor = ciphers.Cipher(CIPHER(derived_key), MODE(iv)).decryptor()
-        client_certificate = decryptor.update(data[16:-384])+decryptor.finalize()
+        decryptor = ciphers.Cipher(CIPHER(server_receive_key), MODE(server_receive_iv)).decryptor()
+        client_certificate = decryptor.update(data[:-384])+decryptor.finalize()
         client_certificate = unpadder.update(client_certificate)+unpadder.finalize()
         client_certificate = x509.load_pem_x509_certificate(client_certificate)
         client_signature = data[-384:]
         client_certificate.public_key().verify(client_signature,request.getHeader(b'id'),asympad.PKCS1v15(),hashes.SHA256())
-        license_key = os.urandom(256) # TODO: unused
-        licenses[request.getHeader(b'id')]=(client_certificate.public_key(),derived_key,time()+HOUR) #this should  be PUBLIC KEY - LICENSE - EXPIRE TIME
-        return derived_key # TODO: this shouldnt be sending the derived key, right?
+
+        # TODO: look properly at the rest of the comment
+        # license_key = os.urandom(256) # TODO: unused
+        # licenses[request.getHeader(b'id')]=(client_certificate.public_key(),derived_key,time()+HOUR) #this should  be PUBLIC KEY - LICENSE - EXPIRE TIME
+        # return derived_key # TODO: this shouldnt be sending the derived key, right?
+        return None
 
 
     # Send the list of media files to clients
@@ -141,7 +150,7 @@ class MediaServer(resource.Resource):
         if request.getHeader(b'id') not in ids_info.keys():
             request.setResponseCode(401)
             return "register a key first".encode('latin')
-        if ids_info[request.getHeader(b'id')][1]<time():
+        if ids_info[request.getHeader(b'id')][3]<time():
             try:
                 del ids_info[request.getHeader(b'id')]
             except:

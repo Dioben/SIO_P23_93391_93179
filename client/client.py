@@ -37,6 +37,11 @@ if CLIENT_CERTIFICATE.not_valid_before>date or date>CLIENT_CERTIFICATE.not_valid
 slots = pkcs11.getSlotList()
 citizen_card_session = pkcs11.openSession(slots[0])
 
+def ratchet_next(ratchet_key, HASH, salt):
+    output = HKDF(algorithm=HASH(),length=80,salt=salt,info=None).derive(ratchet_key)
+    ratchet_key, cipher_key, iv = output[:32], output[32:64], output[64:]
+    return ratchet_key, cipher_key, iv
+
 def main():
     
     print("|--------------------------------------|")
@@ -104,15 +109,21 @@ def main():
     s.headers.update({'id':clientID})
     server_dh = req.content.split(b"\n",1)[1]
 
-    # Calculates shared key for further messaging
+    # Calculates shared keys for further messaging
     server_dh = serialization.load_pem_public_key(server_dh)
     shared_key = client_dh_private.exchange(ec.ECDH(), server_dh)
-    derived_key = HKDF(algorithm=HASH(),length=32,salt=salt,info=None).derive(shared_key)
+    client_ratchet_key = HKDF(algorithm=HASH(),length=32,salt=salt,info=None).derive(shared_key)
+    client_ratchet_send_key = client_ratchet_key
+    client_ratchet_key = HKDF(algorithm=HASH(),length=32,salt=salt,info=None).derive(client_ratchet_key)
+    client_ratchet_receive_key = client_ratchet_key
+
+    # client_ratchet_send_key, client_send_key, client_send_iv = ratchet_next(client_ratchet_send_key, HASH, salt)
+    # client_ratchet_receive_key, client_receive_key, client_receive_iv = ratchet_next(client_ratchet_receive_key, HASH, salt)
 
     # TODO: make the signature check work
     # Encrypts the client's certificate with the shared key
-    iv = os.urandom(16)
-    encryptor = ciphers.Cipher(CIPHER(derived_key),MODE(iv)).encryptor()
+    client_ratchet_send_key, client_send_key, client_send_iv = ratchet_next(client_ratchet_key, HASH, salt)
+    encryptor = ciphers.Cipher(CIPHER(client_send_key),MODE(client_send_iv)).encryptor() # TODO: needs to activate send's ratchet after this
     padder = padding.PKCS7(256).padder()
     encrypted_client_certificate = padder.update(CLIENT_CERTIFICATE.public_bytes(encoding=serialization.Encoding.PEM))+padder.finalize()
     encrypted_client_certificate = encryptor.update(encrypted_client_certificate)+encryptor.finalize()
@@ -122,8 +133,8 @@ def main():
     mechanism = PyKCS11.Mechanism(PyKCS11.CKM_SHA256_RSA_PKCS,None) #BASICALLY MANDATORY, IT'S EITHER SHA 2 OR SHA 1/MD5 WHICH ARENT TRUSTWORTHY
     client_signature = bytes(citizen_card_session.sign(citizen_card_private_key, clientID, mechanism))
     
-    # Sends an iv, the encrypted client's certificate and the signed clientID to the server at /auth
-    req = s.post(f'{SERVER_URL}/api/auth',data=iv+encrypted_client_certificate+client_signature)
+    # Sends the encrypted client's certificate and the signed clientID to the server at /auth
+    req = s.post(f'{SERVER_URL}/api/auth',data=encrypted_client_certificate+client_signature)
     
     # Gets list of musics from the server
     req = s.get(f'{SERVER_URL}/api/list')
