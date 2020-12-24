@@ -190,7 +190,7 @@ class MediaServer(resource.Resource):
         server_data_hmac.update(encrypted_data)
         server_data_hmac = server_data_hmac.finalize() # Has to send finalize because only bytes can be sent (is then compared with client's finalize)
 
-        return encrypted_data+('\n\n\n\n\n').encode('latin')+server_data_hmac # May be better to find another way to separate encrypted_data and server_data_hmac
+        return encrypted_data+server_data_hmac # May be better to find another way to separate encrypted_data and server_data_hmac
 
 
     # Send a media chunk to the client
@@ -268,7 +268,7 @@ class MediaServer(resource.Resource):
             server_data_hmac.update(encrypted_data)
             server_data_hmac = server_data_hmac.finalize() # Has to send finalize because only bytes can be sent (is then compared with client's finalize)
 
-            return encrypted_data+('\n\n\n\n\n').encode('latin')+server_data_hmac # May be better to find another way to separate encrypted_data and server_data_hmac
+            return encrypted_data+server_data_hmac
 
         # File was not open?
         request.responseHeaders.addRawHeader(b"content-type", b"application/json")
