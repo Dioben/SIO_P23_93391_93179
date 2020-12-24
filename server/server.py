@@ -87,7 +87,7 @@ class MediaServer(resource.Resource):
 
     def do_key(self,request):
         """ Gets salt (random bytes) and the client DH parameter (key used to find the shared key)
-            Calculates shared key and saves the userId and its time
+            Calculates shared key and saves the clientID and its time
             Returns userId and the server DH parameter"""
         HASH = cipher_suites.HASHES[request.getHeader(b'suite_hash')[0]]
         data = request.content.read()
@@ -124,7 +124,7 @@ class MediaServer(resource.Resource):
         MODE = cipher_suites.MODES[request.getHeader(b'suite_mode')[0]]
         HASH = cipher_suites.HASHES[request.getHeader(b'suite_hash')[0]]
         derived_key = ids_info[request.getHeader(b'id')][0]
-        unpadder = padder = padding.PKCS7(256).unpadder()
+        unpadder = padding.PKCS7(256).unpadder()
         decryptor = ciphers.Cipher(CIPHER(derived_key), MODE(iv)).decryptor()
         client_certificate = decryptor.update(data[16:-384])+decryptor.finalize()
         client_certificate = unpadder.update(client_certificate)+unpadder.finalize()

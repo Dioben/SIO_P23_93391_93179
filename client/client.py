@@ -52,19 +52,20 @@ def main():
     # Finds 3 random possible protocol/cipher suite possibilities and a client random (random 32 bytes)
     protocol_list = list(cipher_suites.getCipherSuiteList(3))
     client_random = os.urandom(32)
+    
     # Sends the protocol_list and client random to the server at /protocols
     req = s.post(f'{SERVER_URL}/api/protocols', data = client_random+json.dumps(protocol_list).encode('latin'))
     if req.status_code==200:
         print("Got Protocol List")
 
-    # Saves what protocol/cipher suite the server chose and returned
+    # Server returns the protocol/cipher suite it chose
     cipher_suite = req.text.split('\n',1)[0].split('_')
     print("cipher suite:", cipher_suite)
     CIPHER = cipher_suites.CIPHERS[cipher_suites.cs_indexes[cipher_suite[3]]]
     MODE = cipher_suites.MODES[cipher_suites.cs_indexes[cipher_suite[4]]]
     HASH = cipher_suites.HASHES[cipher_suites.cs_indexes[cipher_suite[5]]]
 
-    # Saves the server's certificate and the client random signed by the server which the server returned
+    # Server returns the server's certificate and the client random signed by the server
     print("chose ",CIPHER, MODE, HASH)
     SERVER_CERTIFICATE = req.content.split(b"\n",1)[1].split(b"\n-----END CERTIFICATE-----\n")[0] +b"\n-----END CERTIFICATE-----\n"
     signed_client_random = req.content.split(b"\n-----END CERTIFICATE-----\n")[1]
@@ -88,43 +89,43 @@ def main():
         'suite_cipher':(cipher_suites.cs_indexes[cipher_suite[3]]).to_bytes(1,"big"),
         'suite_mode':(cipher_suites.cs_indexes[cipher_suite[4]]).to_bytes(1,"big")})
     
+    # AT THIS POINT SERVER HAS BEEN VERIFIED, WE'VE STILL GOTTA DO IT
     
-    #AT THIS POINT SERVER HAS BEEN VERIFIED, WE'VE STILL GOTTA DO IT
-    
-    #Diffie-Hellman setup- using ephemeral elliptic for max performance/safety
+    # Diffie-Hellman setup - using ephemeral elliptic for max performance/safety
+    # Send salt and client's DH parameter to the server at /key
     salt = os.urandom(32)
     client_dh_private = ec.generate_private_key(ec.SECP384R1())
     client_dh = client_dh_private.public_key()
-
     payload = salt + client_dh.public_bytes(encoding=serialization.Encoding.PEM,format=serialization.PublicFormat.SubjectPublicKeyInfo)
     req = s.post(f'{SERVER_URL}/api/key',data=payload)
 
+    # Server returns the client's ID and the server's DH parameter
     clientID = req.content.split(b"\n",1)[0].decode('latin')
+    s.headers.update({'id':clientID})
     server_dh = req.content.split(b"\n",1)[1]
 
+    # Calculates shared key for further messaging
     server_dh = serialization.load_pem_public_key(server_dh)
     shared_key = client_dh_private.exchange(ec.ECDH(), server_dh)
     derived_key = HKDF(algorithm=HASH(),length=32,salt=salt,info=None).derive(shared_key)
 
-    s.headers.update({'id':clientID})
-
     # TODO: make the signature check work
-    # Encrypts the certificate with the shared key
+    # Encrypts the client's certificate with the shared key
     iv = os.urandom(16)
     encryptor = ciphers.Cipher(CIPHER(derived_key),MODE(iv)).encryptor()
     padder = padding.PKCS7(256).padder()
     encrypted_client_certificate = padder.update(CLIENT_CERTIFICATE.public_bytes(encoding=serialization.Encoding.PEM))+padder.finalize()
     encrypted_client_certificate = encryptor.update(encrypted_client_certificate)+encryptor.finalize()
 
+    # Signs the clientID
     citizen_card_private_key = citizen_card_session.findObjects([(PyKCS11.CKA_CLASS, PyKCS11.CKO_PRIVATE_KEY),(PyKCS11.CKA_LABEL, 'CITIZEN AUTHENTICATION KEY')])[0]
     mechanism = PyKCS11.Mechanism(PyKCS11.CKM_SHA256_RSA_PKCS,None) #BASICALLY MANDATORY, IT'S EITHER SHA 2 OR SHA 1/MD5 WHICH ARENT TRUSTWORTHY
-
-    # TODO: this is sending the private key, should it be doing this?
     client_signature = bytes(citizen_card_session.sign(citizen_card_private_key, clientID, mechanism))
     
+    # Sends an iv, the encrypted client's certificate and the signed clientID to the server at /auth
     req = s.post(f'{SERVER_URL}/api/auth',data=iv+encrypted_client_certificate+client_signature)
     
-    
+    # Gets list of musics from the server
     req = s.get(f'{SERVER_URL}/api/list')
     if req.status_code == 200:
         print("Got Server List")
