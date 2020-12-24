@@ -42,6 +42,29 @@ def ratchet_next(ratchet_key, HASH, salt):
     ratchet_key, cipher_key, iv = output[:32], output[32:64], output[64:]
     return ratchet_key, cipher_key, iv
 
+def encrypt_message_hmac(data, CIPHER, MODE, HASH, key, iv):
+    encryptor = ciphers.Cipher(CIPHER(key),MODE(iv)).encryptor()
+    padder = padding.PKCS7(256).padder()
+    encrypted_data = padder.update(data)+padder.finalize()
+    encrypted_data = encryptor.update(encrypted_data)+encryptor.finalize()
+    data_hmac = hmac.HMAC(key, HASH())
+    data_hmac.update(encrypted_data)
+    data_hmac = data_hmac.finalize() # Has to send finalize because only bytes can be sent (is then compared with client's finalize)
+    return encrypted_data, data_hmac
+
+def decrypt_message_hmac(data, CIPHER, MODE, HASH, key, iv):
+    encrypted_data, data_hmac = data[:-32], data[-32:]
+    data_hmac_2 = hmac.HMAC(key, HASH())
+    data_hmac_2.update(encrypted_data)
+    data_hmac_2 = data_hmac_2.finalize()
+    if data_hmac != data_hmac_2:
+        return None, False
+    decryptor = ciphers.Cipher(CIPHER(key), MODE(iv)).decryptor()
+    unpadder = padding.PKCS7(256).unpadder()
+    encrypted_data = decryptor.update(encrypted_data)+decryptor.finalize()
+    data = unpadder.update(encrypted_data)+unpadder.finalize()
+    return data, True
+
 def main():
     
     print("|--------------------------------------|")
@@ -141,21 +164,28 @@ def main():
     if req.status_code == 200:
         print("Got Server List")
     content = req.content
-    encrypted_data, server_data_hmac = content[:-32], content[-32:]
+    # encrypted_data, server_data_hmac = content[:-32], content[-32:]
+
+    # client_ratchet_receive_key, client_receive_key, client_receive_iv = ratchet_next(client_ratchet_receive_key, HASH, salt)
+    # client_data_hmac = hmac.HMAC(client_receive_key, HASH())
+    # client_data_hmac.update(encrypted_data)
+    # client_data_hmac = client_data_hmac.finalize()
+
+    # if server_data_hmac != client_data_hmac:
+    #     print("Server list is corrupted")
+    #     sys.exit(1)
+
+    # decryptor = ciphers.Cipher(CIPHER(client_receive_key), MODE(client_receive_iv)).decryptor()
+    # unpadder = padding.PKCS7(256).unpadder()
+    # encrypted_data = decryptor.update(encrypted_data)+decryptor.finalize()
+    # data = unpadder.update(encrypted_data)+unpadder.finalize()
+    # media_list = json.loads(data)
 
     client_ratchet_receive_key, client_receive_key, client_receive_iv = ratchet_next(client_ratchet_receive_key, HASH, salt)
-    client_data_hmac = hmac.HMAC(client_receive_key, HASH())
-    client_data_hmac.update(encrypted_data)
-    client_data_hmac = client_data_hmac.finalize()
-
-    if server_data_hmac != client_data_hmac:
+    data, valid_hmac = decrypt_message_hmac(content, CIPHER, MODE, HASH, client_receive_key, client_receive_iv)
+    if not valid_hmac:
         print("Server list is corrupted")
         sys.exit(1)
-
-    decryptor = ciphers.Cipher(CIPHER(client_receive_key), MODE(client_receive_iv)).decryptor()
-    unpadder = padding.PKCS7(256).unpadder()
-    encrypted_data = decryptor.update(encrypted_data)+decryptor.finalize()
-    data = unpadder.update(encrypted_data)+unpadder.finalize()
     media_list = json.loads(data)
 
     # Present a simple selection menu    
@@ -191,7 +221,31 @@ def main():
 
     # Get data from server and send it to the ffplay stdin through a pipe
     for chunk in range(media_item['chunks'] + 1):
-        req = s.get(f'{SERVER_URL}/api/download?id={media_item["id"]}&chunk={chunk}')
+
+        client_ratchet_send_key, client_send_key, client_send_iv = ratchet_next(client_ratchet_send_key, HASH, salt)
+
+        # Encrypt id and chunk with server_send_key and HMAC it
+        encryptor = ciphers.Cipher(CIPHER(client_send_key),MODE(client_send_iv)).encryptor()
+        padder = padding.PKCS7(256).padder()
+
+        # encrypted_media_id = padder.update(media_item["id"])+padder.finalize()
+        # encrypted_media_id = encryptor.update(encrypted_media_id)+encryptor.finalize()
+        # client_media_id_hmac = hmac.HMAC(server_send_key, HASH())
+        # client_media_id_hmac.update(encrypted_media_id)
+        # client_media_id_hmac = client_media_id_hmac.finalize()
+
+        # Make media_item bytes instead
+        encrypted_media_id, client_media_id_hmac = encrypt_message_hmac(media_item["id"].encode('latin'), CIPHER, MODE, HASH, client_send_key, client_send_iv)
+
+        # encrypted_media_chunk = padder.update(chunk)+padder.finalize()
+        # encrypted_media_chunk = encryptor.update(encrypted_media_chunk)+encryptor.finalize()
+        # client_media_chunk_hmac = hmac.HMAC(server_send_key, HASH())
+        # client_media_chunk_hmac.update(encrypted_media_chunk)
+        # client_media_chunk_hmac = client_media_chunk_hmac.finalize()
+
+        encrypted_media_chunk, client_media_chunk_hmac = encrypt_message_hmac(chunk, CIPHER, MODE, HASH, client_send_key, client_send_iv)
+
+        req = s.get(f'{SERVER_URL}/api/download?id={encrypted_media_id+client_media_id_hmac}&chunk={encrypted_media_chunk+client_media_chunk_hmac}')
 
         try:
             # Check if /download returned an error
@@ -200,21 +254,28 @@ def main():
         except:
             content = req.content
 
-            encrypted_data, server_data_hmac = content[:-32], content[-32:]
+            # encrypted_data, server_data_hmac = content[:-32], content[-32:]
+
+            # client_ratchet_receive_key, client_receive_key, client_receive_iv = ratchet_next(client_ratchet_receive_key, HASH, salt)
+            # client_data_hmac = hmac.HMAC(client_receive_key, HASH())
+            # client_data_hmac.update(encrypted_data)
+            # client_data_hmac = client_data_hmac.finalize()
+
+            # if server_data_hmac != client_data_hmac:
+            #     print("Media chunk is corrupted")
+            #     break
+
+            # decryptor = ciphers.Cipher(CIPHER(client_receive_key), MODE(client_receive_iv)).decryptor()
+            # unpadder = padding.PKCS7(256).unpadder()
+            # encrypted_data = decryptor.update(encrypted_data)+decryptor.finalize()
+            # data = unpadder.update(encrypted_data)+unpadder.finalize()
+            # chunk = json.loads(data)
 
             client_ratchet_receive_key, client_receive_key, client_receive_iv = ratchet_next(client_ratchet_receive_key, HASH, salt)
-            client_data_hmac = hmac.HMAC(client_receive_key, HASH())
-            client_data_hmac.update(encrypted_data)
-            client_data_hmac = client_data_hmac.finalize()
-
-            if server_data_hmac != client_data_hmac:
+            data, valid_hmac = decrypt_message_hmac(content, CIPHER, MODE, HASH, client_receive_key, client_receive_iv)
+            if not valid_hmac:
                 print("Media chunk is corrupted")
-                break
-
-            decryptor = ciphers.Cipher(CIPHER(client_receive_key), MODE(client_receive_iv)).decryptor()
-            unpadder = padding.PKCS7(256).unpadder()
-            encrypted_data = decryptor.update(encrypted_data)+decryptor.finalize()
-            data = unpadder.update(encrypted_data)+unpadder.finalize()
+                sys.exit(1)
             chunk = json.loads(data)
 
             data = binascii.a2b_base64(chunk['data'].encode('latin'))
