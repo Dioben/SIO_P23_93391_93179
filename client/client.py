@@ -16,6 +16,7 @@ from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 from cryptography import x509
 from cryptography.hazmat.primitives.asymmetric import padding as asympad
 import cipher_suites
+import base64
 
 logger = logging.getLogger('root')
 FORMAT = "[%(filename)s:%(lineno)s - %(funcName)20s() ] %(message)s"
@@ -203,19 +204,12 @@ def main():
     # Get data from server and send it to the ffplay stdin through a pipe
     for chunk in range(media_item['chunks'] + 1):
 
-        # TODO: fix /download parameter encryption (id hmac is different on decrypt and Invalid padding bytes can occur in decryption if i dont check for invalid hmac)
-        # client_ratchet_send_key, client_send_key, client_send_iv = ratchet_next(client_ratchet_send_key, HASH, salt)
-        # # Encrypt id and chunk with server_send_key and HMAC it
-        # encryptor = ciphers.Cipher(CIPHER(client_send_key),MODE(client_send_iv)).encryptor()
-        # padder = padding.PKCS7(256).padder()
-        # # Make media_item bytes instead
-        # encrypted_media_id, client_media_id_hmac = encrypt_message_hmac(media_item["id"].encode('utf-8'), CIPHER, MODE, HASH, client_send_key, client_send_iv)
-        # # media_id, valid_hmac = decrypt_message_hmac(encrypted_media_id, CIPHER, MODE, HASH, client_send_key, client_send_iv)
-        # encrypted_media_chunk, client_media_chunk_hmac = encrypt_message_hmac(str(chunk).encode('latin'), CIPHER, MODE, HASH, client_send_key, client_send_iv)
-        # # media_chunk, valid_hmac = decrypt_message_hmac(encrypted_media_chunk, CIPHER, MODE, HASH, client_send_key, client_send_iv)
-        # req = s.get(f'{SERVER_URL}/api/download?id={encrypted_media_id+client_media_id_hmac}&chunk={encrypted_media_chunk+client_media_chunk_hmac}')
+        client_ratchet_send_key, client_send_key, client_send_iv = ratchet_next(client_ratchet_send_key, HASH, salt)
 
-        req = s.get(f'{SERVER_URL}/api/download?id={media_item["id"]}&chunk={chunk}')
+        encrypted_media_id, client_media_id_hmac = encrypt_message_hmac(media_item["id"].encode('latin'), CIPHER, MODE, HASH, client_send_key, client_send_iv)
+        encrypted_media_chunk, client_media_chunk_hmac = encrypt_message_hmac(str(chunk).encode('latin'), CIPHER, MODE, HASH, client_send_key, client_send_iv)
+
+        req = s.get(f'{SERVER_URL}/api/download?id={base64.urlsafe_b64encode(encrypted_media_id+client_media_id_hmac)}&chunk={base64.urlsafe_b64encode(encrypted_media_chunk+client_media_chunk_hmac)}')
 
         try:
             # Check if /download returned an error
