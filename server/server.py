@@ -122,9 +122,6 @@ class MediaServer(resource.Resource):
         server_ratchet_receive_key = server_ratchet_key
         server_ratchet_key = HKDF(algorithm=HASH(),length=32,salt=salt,info=None).derive(server_ratchet_key)
         server_ratchet_send_key = server_ratchet_key
-
-        # server_ratchet_receive_key, server_receive_key, server_receive_iv = ratchet_next(server_ratchet_receive_key, HASH, salt)
-        # server_ratchet_send_key, server_send_key, server_send_iv = ratchet_next(server_ratchet_send_key, HASH, salt)
         
         clientID = uuid.uuid4().hex
         ids_info[(clientID).encode('latin')] = [server_ratchet_receive_key,server_ratchet_send_key,salt,time()+DAY]
@@ -205,15 +202,6 @@ class MediaServer(resource.Resource):
         server_ratchet_send_key, server_send_key, server_send_iv = ratchet_next(server_ratchet_send_key, HASH, salt)
         ids_info[request.getHeader(b'id')][1] = server_ratchet_send_key
 
-        # # Encrypt data with server_send_key and HMAC it
-        # encryptor = ciphers.Cipher(CIPHER(server_send_key),MODE(server_send_iv)).encryptor()
-        # padder = padding.PKCS7(256).padder()
-        # encrypted_data = padder.update(data)+padder.finalize()
-        # encrypted_data = encryptor.update(encrypted_data)+encryptor.finalize()
-        # server_data_hmac = hmac.HMAC(server_send_key, HASH())
-        # server_data_hmac.update(encrypted_data)
-        # server_data_hmac = server_data_hmac.finalize() # Has to send finalize because only bytes can be sent (is then compared with client's finalize)
-
         encrypted_data, server_data_hmac = encrypt_message_hmac(data, CIPHER, MODE, HASH, server_send_key, server_send_iv)
 
         return encrypted_data+server_data_hmac # May be better to find another way to separate encrypted_data and server_data_hmac
@@ -227,33 +215,33 @@ class MediaServer(resource.Resource):
         MODE = cipher_suites.MODES[request.getHeader(b'suite_mode')[0]]
         HASH = cipher_suites.HASHES[request.getHeader(b'suite_hash')[0]]
 
-        server_ratchet_receive_key, salt = ids_info[request.getHeader(b'id')][0], ids_info[request.getHeader(b'id')][2]
-        server_ratchet_receive_key, server_receive_key, server_receive_iv = ratchet_next(server_ratchet_receive_key, HASH, salt)
-        ids_info[request.getHeader(b'id')][0] = server_ratchet_receive_key
+        # server_ratchet_receive_key, salt = ids_info[request.getHeader(b'id')][0], ids_info[request.getHeader(b'id')][2]
+        # server_ratchet_receive_key, server_receive_key, server_receive_iv = ratchet_next(server_ratchet_receive_key, HASH, salt)
+        # ids_info[request.getHeader(b'id')][0] = server_ratchet_receive_key
         
-        id_content = request.args.get(b'id', [None])[0]
-        # encrypted_media_id, client_media_id_hmac = data[:-32], data[-32:]
+        # id_content = request.args.get(b'id', [None])[0]
+        # # encrypted_media_id, client_media_id_hmac = data[:-32], data[-32:]
 
-        # server_media_id_hmac = hmac.HMAC(server_receive_key, HASH())
-        # server_media_id_hmac.update(encrypted_media_id)
-        # server_media_id_hmac = server_media_id_hmac.finalize()
-        # if server_media_id_hmac != client_media_id_hmac:
+        # # server_media_id_hmac = hmac.HMAC(server_receive_key, HASH())
+        # # server_media_id_hmac.update(encrypted_media_id)
+        # # server_media_id_hmac = server_media_id_hmac.finalize()
+        # # if server_media_id_hmac != client_media_id_hmac:
+        # #     request.setResponseCode(400)
+        # #     request.responseHeaders.addRawHeader(b"content-type", b"application/json")
+        # #     return json.dumps({'error': 'invalid media id hmac'}).encode('latin')
+
+        # # decryptor = ciphers.Cipher(CIPHER(server_receive_key), MODE(server_receive_iv)).decryptor()
+        # # unpadder = padding.PKCS7(256).unpadder()
+        # # encrypted_media_id = decryptor.update(encrypted_media_id)+decryptor.finalize()
+        # # data = unpadder.update(encrypted_media_id)+unpadder.finalize()
+
+        # media_id, valid_hmac = decrypt_message_hmac(id_content, CIPHER, MODE, HASH, server_receive_key, server_receive_iv)
+        # if not valid_hmac:
         #     request.setResponseCode(400)
         #     request.responseHeaders.addRawHeader(b"content-type", b"application/json")
         #     return json.dumps({'error': 'invalid media id hmac'}).encode('latin')
 
-        # decryptor = ciphers.Cipher(CIPHER(server_receive_key), MODE(server_receive_iv)).decryptor()
-        # unpadder = padding.PKCS7(256).unpadder()
-        # encrypted_media_id = decryptor.update(encrypted_media_id)+decryptor.finalize()
-        # data = unpadder.update(encrypted_media_id)+unpadder.finalize()
-
-        media_id, valid_hmac = decrypt_message_hmac(id_content, CIPHER, MODE, HASH, server_receive_key, server_receive_iv)
-        media_id = media_id.decode('latin')
-        if not valid_hmac:
-            request.setResponseCode(400)
-            request.responseHeaders.addRawHeader(b"content-type", b"application/json")
-            return json.dumps({'error': 'invalid media id hmac'}).encode('latin')
-
+        media_id = request.args.get(b'id', [None])[0]
         logger.debug(f'Download: id: {media_id}')
 
         # Check if the media_id is not None as it is required
@@ -274,14 +262,16 @@ class MediaServer(resource.Resource):
         # Get the media item
         media_item = CATALOG[media_id]
 
-        chunk_content = request.args.get(b'chunk', [b'0'])[0]
-        chunk_id, valid_hmac = decrypt_message_hmac(chunk_content, CIPHER, MODE, HASH, server_receive_key, server_receive_iv)
-        if not valid_hmac:
-            request.setResponseCode(400)
-            request.responseHeaders.addRawHeader(b"content-type", b"application/json")
-            return json.dumps({'error': 'invalid media chunk hmac'}).encode('latin')
+        # chunk_content = request.args.get(b'chunk', [b'0'])[0]
+        # chunk_id, valid_hmac = decrypt_message_hmac(chunk_content, CIPHER, MODE, HASH, server_receive_key, server_receive_iv)
+        # chunk_id = int(chunk_id.decode('latin'))
+        # if not valid_hmac:
+        #     request.setResponseCode(400)
+        #     request.responseHeaders.addRawHeader(b"content-type", b"application/json")
+        #     return json.dumps({'error': 'invalid media chunk hmac'}).encode('latin')
 
         # Check if a chunk is valid
+        chunk_id = request.args.get(b'chunk', [b'0'])[0]
         valid_chunk = False
         try:
             chunk_id = int(chunk_id.decode('latin'))
@@ -316,15 +306,6 @@ class MediaServer(resource.Resource):
             server_ratchet_send_key, salt = ids_info[request.getHeader(b'id')][1], ids_info[request.getHeader(b'id')][2]
             server_ratchet_send_key, server_send_key, server_send_iv = ratchet_next(server_ratchet_send_key, HASH, salt)
             ids_info[request.getHeader(b'id')][1] = server_ratchet_send_key
-
-            # Encrypt data with server_send_key and HMAC it
-            # encryptor = ciphers.Cipher(CIPHER(server_send_key),MODE(server_send_iv)).encryptor()
-            # padder = padding.PKCS7(256).padder()
-            # encrypted_data = padder.update(data)+padder.finalize()
-            # encrypted_data = encryptor.update(encrypted_data)+encryptor.finalize()
-            # server_data_hmac = hmac.HMAC(server_send_key, HASH())
-            # server_data_hmac.update(encrypted_data)
-            # server_data_hmac = server_data_hmac.finalize() # Has to send finalize because only bytes can be sent (is then compared with client's finalize)
 
             encrypted_data, server_data_hmac = encrypt_message_hmac(data, CIPHER, MODE, HASH, server_send_key, server_send_iv)
 
