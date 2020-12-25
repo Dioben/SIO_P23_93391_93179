@@ -16,6 +16,7 @@ import uuid
 from time import time
 from cryptography import x509
 import cipher_suites
+import base64
 
 logger = logging.getLogger('root')
 FORMAT = "[%(filename)s:%(lineno)s - %(funcName)20s() ] %(message)s"
@@ -215,33 +216,20 @@ class MediaServer(resource.Resource):
         MODE = cipher_suites.MODES[request.getHeader(b'suite_mode')[0]]
         HASH = cipher_suites.HASHES[request.getHeader(b'suite_hash')[0]]
 
-        # server_ratchet_receive_key, salt = ids_info[request.getHeader(b'id')][0], ids_info[request.getHeader(b'id')][2]
-        # server_ratchet_receive_key, server_receive_key, server_receive_iv = ratchet_next(server_ratchet_receive_key, HASH, salt)
-        # ids_info[request.getHeader(b'id')][0] = server_ratchet_receive_key
-        
-        # id_content = request.args.get(b'id', [None])[0]
-        # # encrypted_media_id, client_media_id_hmac = data[:-32], data[-32:]
+        # Key for decrypting the get's parameters
+        server_ratchet_receive_key, salt = ids_info[request.getHeader(b'id')][0], ids_info[request.getHeader(b'id')][2]
+        server_ratchet_receive_key, server_receive_key, server_receive_iv = ratchet_next(server_ratchet_receive_key, HASH, salt)
+        ids_info[request.getHeader(b'id')][0] = server_ratchet_receive_key
 
-        # # server_media_id_hmac = hmac.HMAC(server_receive_key, HASH())
-        # # server_media_id_hmac.update(encrypted_media_id)
-        # # server_media_id_hmac = server_media_id_hmac.finalize()
-        # # if server_media_id_hmac != client_media_id_hmac:
-        # #     request.setResponseCode(400)
-        # #     request.responseHeaders.addRawHeader(b"content-type", b"application/json")
-        # #     return json.dumps({'error': 'invalid media id hmac'}).encode('latin')
+        id_content = base64.urlsafe_b64decode(request.args.get(b'id', [None])[0].decode('utf-8')[2:-1])
 
-        # # decryptor = ciphers.Cipher(CIPHER(server_receive_key), MODE(server_receive_iv)).decryptor()
-        # # unpadder = padding.PKCS7(256).unpadder()
-        # # encrypted_media_id = decryptor.update(encrypted_media_id)+decryptor.finalize()
-        # # data = unpadder.update(encrypted_media_id)+unpadder.finalize()
+        media_id, valid_hmac = decrypt_message_hmac(id_content, CIPHER, MODE, HASH, server_receive_key, server_receive_iv)
+        if not valid_hmac:
+            request.setResponseCode(400)
+            request.responseHeaders.addRawHeader(b"content-type", b"application/json")
+            return json.dumps({'error': 'invalid media id hmac'}).encode('latin')
 
-        # media_id, valid_hmac = decrypt_message_hmac(id_content, CIPHER, MODE, HASH, server_receive_key, server_receive_iv)
-        # if not valid_hmac:
-        #     request.setResponseCode(400)
-        #     request.responseHeaders.addRawHeader(b"content-type", b"application/json")
-        #     return json.dumps({'error': 'invalid media id hmac'}).encode('latin')
-
-        media_id = request.args.get(b'id', [None])[0]
+        # media_id = request.args.get(b'id', [None])[0]
         logger.debug(f'Download: id: {media_id}')
 
         # Check if the media_id is not None as it is required
@@ -262,16 +250,15 @@ class MediaServer(resource.Resource):
         # Get the media item
         media_item = CATALOG[media_id]
 
-        # chunk_content = request.args.get(b'chunk', [b'0'])[0]
-        # chunk_id, valid_hmac = decrypt_message_hmac(chunk_content, CIPHER, MODE, HASH, server_receive_key, server_receive_iv)
-        # chunk_id = int(chunk_id.decode('latin'))
-        # if not valid_hmac:
-        #     request.setResponseCode(400)
-        #     request.responseHeaders.addRawHeader(b"content-type", b"application/json")
-        #     return json.dumps({'error': 'invalid media chunk hmac'}).encode('latin')
+        chunk_content = base64.urlsafe_b64decode(request.args.get(b'chunk', [b'0'])[0].decode('utf-8')[2:-1])
+
+        chunk_id, valid_hmac = decrypt_message_hmac(chunk_content, CIPHER, MODE, HASH, server_receive_key, server_receive_iv)
+        if not valid_hmac:
+            request.setResponseCode(400)
+            request.responseHeaders.addRawHeader(b"content-type", b"application/json")
+            return json.dumps({'error': 'invalid media chunk hmac'}).encode('latin')
 
         # Check if a chunk is valid
-        chunk_id = request.args.get(b'chunk', [b'0'])[0]
         valid_chunk = False
         try:
             chunk_id = int(chunk_id.decode('latin'))
