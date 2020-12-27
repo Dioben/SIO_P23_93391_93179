@@ -1,3 +1,4 @@
+from PyKCS11.LowLevel import ckbytelist
 import requests
 import logging
 import binascii
@@ -142,21 +143,28 @@ def main():
     client_ratchet_receive_key = client_ratchet_key
 
     # TODO: make the signature check work
-    # Encrypts the client's certificate with the shared key
-    client_ratchet_send_key, client_send_key, client_send_iv = ratchet_next(client_ratchet_send_key, HASH, salt)
-    encryptor = ciphers.Cipher(CIPHER(client_send_key),MODE(client_send_iv)).encryptor()
-    padder = padding.PKCS7(256).padder()
-    encrypted_client_certificate = padder.update(CLIENT_CERTIFICATE.public_bytes(encoding=serialization.Encoding.PEM))+padder.finalize()
-    encrypted_client_certificate = encryptor.update(encrypted_client_certificate)+encryptor.finalize()
+
 
     # Signs the clientID
     citizen_card_private_key = citizen_card_session.findObjects([(PyKCS11.CKA_CLASS, PyKCS11.CKO_PRIVATE_KEY),(PyKCS11.CKA_LABEL, 'CITIZEN AUTHENTICATION KEY')])[0]
     mechanism = PyKCS11.Mechanism(PyKCS11.CKM_SHA256_RSA_PKCS,None) #BASICALLY MANDATORY, IT'S EITHER SHA 2 OR SHA 1/MD5 WHICH ARENT TRUSTWORTHY
-    client_signature = bytes(citizen_card_session.sign(citizen_card_private_key, clientID, mechanism))
+    client_signature = bytes(citizen_card_session.sign(citizen_card_private_key, clientID.encode('latin'), mechanism))
+
+    # CLIENT_CERTIFICATE.public_key().verify(client_signature,clientID.encode('latin'),asympad.PKCS1v15(),hashes.SHA256())
+
+    client_ratchet_send_key, client_send_key, client_send_iv = ratchet_next(client_ratchet_send_key, HASH, salt)
+    encrypted_data, client_data_hmac = encrypt_message_hmac(len(client_signature).to_bytes(2, 'big')+CLIENT_CERTIFICATE.public_bytes(encoding=serialization.Encoding.PEM)+client_signature, CIPHER, MODE, HASH, client_send_key, client_send_iv)
     
-    # Sends the encrypted client's certificate and the signed clientID to the server at /auth
-    req = s.post(f'{SERVER_URL}/api/auth',data=encrypted_client_certificate+client_signature)
-    
+    # Sends the encrypted client's certificate and the signed clientID to the server at /auth, and receives an encrypted license token to send with every message
+    req = s.post(f'{SERVER_URL}/api/auth',data=encrypted_data+client_data_hmac)
+    content = req.content
+    client_ratchet_receive_key, client_receive_key, client_receive_iv = ratchet_next(client_ratchet_receive_key, HASH, salt)
+    data, valid_hmac = decrypt_message_hmac(content, CIPHER, MODE, HASH, client_receive_key, client_receive_iv)
+    if not valid_hmac:
+        print("Server license token is corrupted")
+        sys.exit(1)
+
+
     # Gets list of musics from the server
     req = s.get(f'{SERVER_URL}/api/list')
     if req.status_code == 200:

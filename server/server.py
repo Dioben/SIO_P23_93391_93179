@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 
+from PyKCS11 import ckbytelist
 from twisted.web import server, resource
 from twisted.internet import reactor, defer
 import logging
@@ -47,7 +48,7 @@ with open('privkey.pem','rb') as keyfile:
     SERVER_PRIVATE_KEY = serialization.load_pem_private_key(keyfile.read(),password=None)
 
 # Contains entries: clientID<server_ratchet_receive_key,server_ratchet_send_key,salt,time_valid>
-ids_info={}
+ids_info = {}
 
 licenses = {}
 
@@ -131,8 +132,8 @@ class MediaServer(resource.Resource):
 
 
     def do_auth(self,request):
-        """ Recieves the client's certificate and a client signature 
-            TODO: Finish this javadoc after i'm sure of what this function does """
+        """ Recieves the client's certificate and a client signature
+            Returns a token for a license """
         if request.getHeader(b'id') not in ids_info.keys():
             return "register a key first".encode('latin')
         if ids_info[request.getHeader(b'id')][3]<time():
@@ -142,7 +143,8 @@ class MediaServer(resource.Resource):
                 pass
             request.setResponseCode(401)
             return "your key has expired".encode('latin')
-        data = request.content.read()
+
+        content = request.content.read()
         CIPHER = cipher_suites.CIPHERS[request.getHeader(b'suite_cipher')[0]]
         MODE = cipher_suites.MODES[request.getHeader(b'suite_mode')[0]]
         HASH = cipher_suites.HASHES[request.getHeader(b'suite_hash')[0]]
@@ -151,19 +153,28 @@ class MediaServer(resource.Resource):
         server_ratchet_receive_key, server_receive_key, server_receive_iv = ratchet_next(server_ratchet_receive_key, HASH, salt)
         ids_info[request.getHeader(b'id')][0] = server_ratchet_receive_key
 
-        unpadder = padding.PKCS7(256).unpadder()
-        decryptor = ciphers.Cipher(CIPHER(server_receive_key), MODE(server_receive_iv)).decryptor()
-        client_certificate = decryptor.update(data[:-384])+decryptor.finalize()
-        client_certificate = unpadder.update(client_certificate)+unpadder.finalize()
-        client_certificate = x509.load_pem_x509_certificate(client_certificate)
-        client_signature = data[-384:]
+        data, valid_hmac = decrypt_message_hmac(content, CIPHER, MODE, HASH, server_receive_key, server_receive_iv)
+        if not valid_hmac:
+            request.setResponseCode(400)
+            request.responseHeaders.addRawHeader(b"content-type", b"application/json")
+            return json.dumps({'error': 'invalid auth hmac'}).encode('latin')
+
+        client_signature_len = int.from_bytes(data[:2], 'big')
+
+        client_certificate, client_signature = x509.load_pem_x509_certificate(data[2:-client_signature_len]), data[-client_signature_len:]
+
         client_certificate.public_key().verify(client_signature,request.getHeader(b'id'),asympad.PKCS1v15(),hashes.SHA256())
 
-        # TODO: look properly at the rest of the comment
-        # license_key = os.urandom(256) # TODO: unused
-        # licenses[request.getHeader(b'id')]=(client_certificate.public_key(),derived_key,time()+HOUR) #this should  be PUBLIC KEY - LICENSE - EXPIRE TIME
-        # return derived_key # TODO: this shouldnt be sending the derived key, right?
-        return None
+        license_key = os.urandom(256)
+        licenses[request.getHeader(b'id')]=(client_certificate.public_key(), license_key, time()+HOUR) # TODO: check if public key is necessary
+
+        server_ratchet_send_key, salt = ids_info[request.getHeader(b'id')][1], ids_info[request.getHeader(b'id')][2]
+        server_ratchet_send_key, server_send_key, server_send_iv = ratchet_next(server_ratchet_send_key, HASH, salt)
+        ids_info[request.getHeader(b'id')][1] = server_ratchet_send_key
+
+        encrypted_data, server_data_hmac = encrypt_message_hmac(license_key, CIPHER, MODE, HASH, server_send_key, server_send_iv)
+
+        return encrypted_data + server_data_hmac
 
 
     # Send the list of media files to clients
