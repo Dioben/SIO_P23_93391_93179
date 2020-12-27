@@ -153,7 +153,7 @@ def main():
     # CLIENT_CERTIFICATE.public_key().verify(client_signature,clientID.encode('latin'),asympad.PKCS1v15(),hashes.SHA256())
 
     client_ratchet_send_key, client_send_key, client_send_iv = ratchet_next(client_ratchet_send_key, HASH, salt)
-    encrypted_data, client_data_hmac = encrypt_message_hmac(CLIENT_CERTIFICATE.public_bytes(encoding=serialization.Encoding.PEM)+client_signature, CIPHER, MODE, HASH, client_send_key, client_send_iv)
+    encrypted_data, client_data_hmac = encrypt_message_hmac(len(client_signature).to_bytes(2, 'big')+CLIENT_CERTIFICATE.public_bytes(encoding=serialization.Encoding.PEM)+client_signature, CIPHER, MODE, HASH, client_send_key, client_send_iv)
     
     # Sends the encrypted client's certificate and the signed clientID to the server at /auth, and receives an encrypted license token to send with every message
     req = s.post(f'{SERVER_URL}/api/auth',data=encrypted_data+client_data_hmac)
