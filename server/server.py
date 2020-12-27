@@ -159,7 +159,7 @@ class MediaServer(resource.Resource):
             request.responseHeaders.addRawHeader(b"content-type", b"application/json")
             return json.dumps({'error': 'invalid auth hmac'}).encode('latin')
 
-        client_certificate, client_signature = x509.load_pem_x509_certificate(data[:-256]), ckbytelist(data[-256:])
+        client_certificate, client_signature = x509.load_pem_x509_certificate(data[:-256]), data[-256:]
 
         client_certificate.public_key().verify(client_signature,request.getHeader(b'id'),asympad.PKCS1v15(),hashes.SHA256())
 
