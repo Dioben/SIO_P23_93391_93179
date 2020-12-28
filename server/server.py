@@ -28,7 +28,9 @@ CATALOG = { '898a08080d1840793122b7e118b27a95d117ebce':
                 'album': 'Upbeat Ukulele Background Music',
                 'description': 'Nicolai Heidlas Music: http://soundcloud.com/nicolai-heidlas',
                 'duration': 3*60+33,
-                'file_name': '898a08080d1840793122b7e118b27a95d117ebce.mp3',
+                # 'file_name': '898a08080d1840793122b7e118b27a95d117ebce.mp3',
+                'file_name': '898a08080d1840793122b7e118b27a95d117ebce',
+                'iv': None,
                 'file_size': 3407202
             }
         }
@@ -58,6 +60,10 @@ with open("../client/cert.der","rb") as cert:
 
 # Contains entries: token<clientID, time_valid> # TODO: check if token needs to know which license it came from
 license_tokens = {}
+
+# Key for decrypting media files
+with open('server_media_key', 'rb') as media_key:
+    media_key = media_key.read()
 
 def ratchet_next(ratchet_key, HASH, salt):
     output = HKDF(algorithm=HASH(),length=80,salt=salt,info=None).derive(ratchet_key)
@@ -92,6 +98,19 @@ def error_message(request, code, message):
     request.responseHeaders.addRawHeader(b"content-type", b"application/json")
     return json.dumps({'error': message}).encode('latin')
 
+media_file_unpadder = padding.PKCS7(256).unpadder()
+media_file_algorithm = ciphers.algorithms.AES(media_key)
+def decrypt_chunk(chunk, iv):
+    unpadder = media_file_unpadder
+    cipher = ciphers.Cipher(media_file_algorithm, ciphers.modes.CBC(iv))
+    decryptor = cipher.decryptor()
+    if len(chunk)<CHUNK_SIZE:
+        chunk = decryptor.update(chunk) + decryptor.finalize()
+        chunk = unpadder.update(chunk) + unpadder.finalize()
+    else:
+        chunk = decryptor.update(chunk)
+        chunk = unpadder.update(chunk)
+    return chunk
 
 class MediaServer(resource.Resource):
     isLeaf = True
@@ -309,7 +328,12 @@ class MediaServer(resource.Resource):
 
         if not valid_chunk:
             return error_message(request, 400, 'invalid media chunk id')
-            
+
+        if media_item['iv'] == None:
+            with open(os.path.join(CATALOG_BASE, media_item['file_name']), 'rb') as f:
+                media_item['iv'] = f.read(16)
+        media_iv = media_item['iv']
+
         logger.debug(f'Download: chunk: {chunk_id}')
 
         offset = chunk_id * CHUNK_SIZE
@@ -317,8 +341,10 @@ class MediaServer(resource.Resource):
         # Open file, seek to correct position and return the chunk
         try:
             with open(os.path.join(CATALOG_BASE, media_item['file_name']), 'rb') as f:
-                f.seek(offset)
+                f.seek(offset+16)
                 data = f.read(CHUNK_SIZE)
+
+                data = decrypt_chunk(data, media_iv)
 
                 request.responseHeaders.addRawHeader(b"content-type", b"application/json")
                 data = json.dumps(
