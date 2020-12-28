@@ -58,7 +58,7 @@ with open("../client/cert.der","rb") as cert:
     license_client_certificate = x509.load_der_x509_certificate(cert.read())
     licenses[license_client_certificate.public_key().public_bytes(encoding=serialization.Encoding.PEM, format=serialization.PublicFormat.SubjectPublicKeyInfo)] = [5, time()+HOUR/6] # TODO: increase values for delivery
 
-# Contains entries: token<clientID, time_valid> # TODO: check if token needs to know which license it came from
+# Contains entries: token<time_valid>
 license_tokens = {}
 
 # Key for decrypting media files
@@ -205,7 +205,7 @@ class MediaServer(resource.Resource):
         #     return error_message(request, 400, 'invalid signature')
 
         token = base64.urlsafe_b64encode(os.urandom(256))
-        license_tokens[token] = (request.getHeader(b'id'), time()+HOUR/60) # TODO: increase value for delivery
+        license_tokens[token] = time()+HOUR/60 # TODO: increase value for delivery
 
         server_ratchet_send_key, salt = ids_info[request.getHeader(b'id')][1], ids_info[request.getHeader(b'id')][2]
         server_ratchet_send_key, server_send_key, server_send_iv = ratchet_next(server_ratchet_send_key, HASH, salt)
@@ -226,10 +226,24 @@ class MediaServer(resource.Resource):
             except:
                 pass
             return error_message(request, 401, 'id has expired')
-        if request.getHeader(b'token') not in license_tokens.keys():
+
+        CIPHER = cipher_suites.CIPHERS[request.getHeader(b'suite_cipher')[0]]
+        MODE = cipher_suites.MODES[request.getHeader(b'suite_mode')[0]]
+        HASH = cipher_suites.HASHES[request.getHeader(b'suite_hash')[0]]
+
+        # Key for decrypting the get's parameters
+        server_ratchet_receive_key, salt = ids_info[request.getHeader(b'id')][0], ids_info[request.getHeader(b'id')][2]
+        server_ratchet_receive_key, server_receive_key, server_receive_iv = ratchet_next(server_ratchet_receive_key, HASH, salt)
+        ids_info[request.getHeader(b'id')][0] = server_ratchet_receive_key
+            
+        token_content = base64.urlsafe_b64decode(request.args.get(b'token', [None])[0].decode('utf-8')[2:-1])
+
+        license_token, valid_hmac = decrypt_message_hmac(token_content, CIPHER, MODE, HASH, server_receive_key, server_receive_iv)
+        if not valid_hmac:
+            return error_message(request, 400, 'invalid token hmac')
+        if license_token not in license_tokens.keys():
             return error_message(request, 401, 'token not found')
-        license_token = license_tokens[request.getHeader(b'token')]
-        if license_token[0]!=request.getHeader(b'id') or license_token[1]<time():
+        if license_tokens[license_token]<time():
             return error_message(request, 401, 'token has expired')
 
         # Build list
@@ -247,7 +261,6 @@ class MediaServer(resource.Resource):
         # Return list to client
         request.responseHeaders.addRawHeader(b"content-type", b"application/json")
         data = json.dumps(media_list, indent=4).encode('latin')
-
 
         CIPHER = cipher_suites.CIPHERS[request.getHeader(b'suite_cipher')[0]]
         MODE = cipher_suites.MODES[request.getHeader(b'suite_mode')[0]]
@@ -271,13 +284,8 @@ class MediaServer(resource.Resource):
             except:
                 pass
             return error_message(request, 401, 'id has expired')
-        if request.getHeader(b'token') not in license_tokens.keys():
-            return error_message(request, 401, 'token not found')
-        license_token = license_tokens[request.getHeader(b'token')]
-        if license_token[0]!=request.getHeader(b'id') or license_token[1]<time():
-            return error_message(request, 401, 'token has expired')
 
-        logger.debug(f'Download: args: {request.args}')
+        # logger.debug(f'Download: args: {request.args}')
 
         CIPHER = cipher_suites.CIPHERS[request.getHeader(b'suite_cipher')[0]]
         MODE = cipher_suites.MODES[request.getHeader(b'suite_mode')[0]]
@@ -287,6 +295,15 @@ class MediaServer(resource.Resource):
         server_ratchet_receive_key, salt = ids_info[request.getHeader(b'id')][0], ids_info[request.getHeader(b'id')][2]
         server_ratchet_receive_key, server_receive_key, server_receive_iv = ratchet_next(server_ratchet_receive_key, HASH, salt)
         ids_info[request.getHeader(b'id')][0] = server_ratchet_receive_key
+
+        token_content = base64.urlsafe_b64decode(request.args.get(b'token', [None])[0].decode('utf-8')[2:-1])
+        license_token, valid_hmac = decrypt_message_hmac(token_content, CIPHER, MODE, HASH, server_receive_key, server_receive_iv)
+        if not valid_hmac:
+            return error_message(request, 400, 'invalid token hmac')
+        if license_token not in license_tokens.keys():
+            return error_message(request, 401, 'token not found')
+        if license_tokens[license_token]<time():
+            return error_message(request, 401, 'token has expired')
 
         id_content = base64.urlsafe_b64decode(request.args.get(b'id', [None])[0].decode('utf-8')[2:-1])
 
@@ -329,12 +346,12 @@ class MediaServer(resource.Resource):
         if not valid_chunk:
             return error_message(request, 400, 'invalid media chunk id')
 
+        logger.debug(f'Download: chunk: {chunk_id}')
+
         if media_item['iv'] == None:
             with open(os.path.join(CATALOG_BASE, media_item['file_name']), 'rb') as f:
                 media_item['iv'] = f.read(16)
         media_iv = media_item['iv']
-
-        logger.debug(f'Download: chunk: {chunk_id}')
 
         offset = chunk_id * CHUNK_SIZE
 
@@ -368,7 +385,7 @@ class MediaServer(resource.Resource):
 
   # Handle a GET request
     def render_GET(self, request):
-        logger.debug(f'Received GET request for {request.uri}')
+        logger.debug(f'Received GET request for {request.uri.split(b"?",1)[0]}')
         try:
             if request.path == b'/api/list':
                 return self.do_list(request)
