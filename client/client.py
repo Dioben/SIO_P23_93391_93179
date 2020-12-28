@@ -34,7 +34,7 @@ with open("cert.der","rb") as cert:
     CLIENT_CERTIFICATE = x509.load_der_x509_certificate(cert.read())
 date = datetime.datetime.now()
 if CLIENT_CERTIFICATE.not_valid_before>date or date>CLIENT_CERTIFICATE.not_valid_after:
-    logger.error("expired cert ",CLIENT_CERTIFICATE.public_key)
+    logger.error("expired cert "+str(CLIENT_CERTIFICATE.public_key))
     sys.exit(1)
 slots = pkcs11.getSlotList()
 citizen_card_session = pkcs11.openSession(slots[0])
@@ -70,7 +70,7 @@ def decrypt_message_hmac(data, CIPHER, MODE, HASH, key, iv):
 def is_error_message(req):
     try:
         # Check if server returned an error
-        logger.error(req.status_code ,req.json()['error']) # TODO: maybe encrypt error messages
+        logger.error(req.status_code+': '+req.json()['error']) # TODO: maybe encrypt error messages
         return True
     except:
         return 200>=req.status_code>=300
@@ -99,7 +99,7 @@ def main():
 
     # Server returns the protocol/cipher suite it chose
     cipher_suite = req.text.split('\n',1)[0].split('_')
-    logger.info("cipher suite:", req.text.split('\n',1)[0])
+    logger.info("cipher suite: "+req.text.split('\n',1)[0])
     CIPHER = cipher_suites.CIPHERS[cipher_suites.cs_indexes[cipher_suite[3]]]
     MODE = cipher_suites.MODES[cipher_suites.cs_indexes[cipher_suite[4]]]
     HASH = cipher_suites.HASHES[cipher_suites.cs_indexes[cipher_suite[5]]]
@@ -112,7 +112,7 @@ def main():
     # Checks that the server's certificate is valid
     date = datetime.datetime.now()
     if SERVER_CERTIFICATE.not_valid_before>date or date>SERVER_CERTIFICATE.not_valid_after:
-        logger.error("Expired server cert ",SERVER_CERTIFICATE.not_valid_before," - ",SERVER_CERTIFICATE.not_valid_after)
+        logger.error("Expired server cert: "+str(SERVER_CERTIFICATE.not_valid_before)+" - "+str(SERVER_CERTIFICATE.not_valid_after))
         return
 
     # TODO: check certificate chain
@@ -215,7 +215,7 @@ def main():
 
     # Example: Download first file
     media_item = media_list[selection]
-    logger.info(f"Playing {media_item['name']}")
+    print(f"Playing {media_item['name']}")
 
     # Detect if we are running on Windows or Linux
     # You need to have ffplay or ffplay.exe in the current folder
