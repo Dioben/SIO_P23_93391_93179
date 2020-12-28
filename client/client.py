@@ -34,7 +34,7 @@ with open("cert.der","rb") as cert:
     CLIENT_CERTIFICATE = x509.load_der_x509_certificate(cert.read())
 date = datetime.datetime.now()
 if CLIENT_CERTIFICATE.not_valid_before>date or date>CLIENT_CERTIFICATE.not_valid_after:
-    print("expired cert ",CLIENT_CERTIFICATE.public_key)
+    logger.error("expired cert ",CLIENT_CERTIFICATE.public_key)
     sys.exit(1)
 slots = pkcs11.getSlotList()
 citizen_card_session = pkcs11.openSession(slots[0])
@@ -67,6 +67,14 @@ def decrypt_message_hmac(data, CIPHER, MODE, HASH, key, iv):
     data = unpadder.update(encrypted_data)+unpadder.finalize()
     return data, True
 
+def is_error_message(req):
+    try:
+        # Check if server returned an error
+        logger.error(req.status_code ,req.json()['error']) # TODO: maybe encrypt error messages
+        return True
+    except:
+        return 200>=req.status_code>=300
+
 def main():
     
     print("|--------------------------------------|")
@@ -74,7 +82,7 @@ def main():
     print("|--------------------------------------|\n")
 
     # Get a list of media files
-    print("Contacting Server")
+    logger.info("Contacting Server")
    
     # TODO: Secure the session
     s = requests.Session()
@@ -85,18 +93,18 @@ def main():
     
     # Sends the protocol_list and client random to the server at /protocols
     req = s.post(f'{SERVER_URL}/api/protocols', data = client_random+json.dumps(protocol_list).encode('latin'))
-    if req.status_code==200:
-        print("Got Protocol List")
+    if is_error_message(req):
+        return
+    logger.info("Protocols successful")
 
     # Server returns the protocol/cipher suite it chose
     cipher_suite = req.text.split('\n',1)[0].split('_')
-    print("cipher suite:", cipher_suite)
+    logger.info("cipher suite:", req.text.split('\n',1)[0])
     CIPHER = cipher_suites.CIPHERS[cipher_suites.cs_indexes[cipher_suite[3]]]
     MODE = cipher_suites.MODES[cipher_suites.cs_indexes[cipher_suite[4]]]
     HASH = cipher_suites.HASHES[cipher_suites.cs_indexes[cipher_suite[5]]]
 
     # Server returns the server's certificate and the client random signed by the server
-    print("chose ",CIPHER, MODE, HASH)
     SERVER_CERTIFICATE = req.content.split(b"\n",1)[1].split(b"\n-----END CERTIFICATE-----\n")[0] +b"\n-----END CERTIFICATE-----\n"
     signed_client_random = req.content.split(b"\n-----END CERTIFICATE-----\n")[1]
     SERVER_CERTIFICATE = x509.load_pem_x509_certificate(SERVER_CERTIFICATE)
@@ -104,7 +112,7 @@ def main():
     # Checks that the server's certificate is valid
     date = datetime.datetime.now()
     if SERVER_CERTIFICATE.not_valid_before>date or date>SERVER_CERTIFICATE.not_valid_after:
-        print("Expired server cert ",SERVER_CERTIFICATE.not_valid_before," - ",SERVER_CERTIFICATE.not_valid_after)
+        logger.error("Expired server cert ",SERVER_CERTIFICATE.not_valid_before," - ",SERVER_CERTIFICATE.not_valid_after)
         return
 
     # TODO: check certificate chain
@@ -128,6 +136,9 @@ def main():
     client_dh = client_dh_private.public_key()
     payload = salt + client_dh.public_bytes(encoding=serialization.Encoding.PEM,format=serialization.PublicFormat.SubjectPublicKeyInfo)
     req = s.post(f'{SERVER_URL}/api/key',data=payload)
+    if is_error_message(req):
+        return
+    logger.info("Key successful")
 
     # Server returns the client's ID and the server's DH parameter
     clientID = req.content.split(b"\n",1)[0].decode('latin')
@@ -157,25 +168,30 @@ def main():
     
     # Sends the encrypted client's certificate and the signed clientID to the server at /auth, and receives an encrypted license token to send with every message
     req = s.post(f'{SERVER_URL}/api/auth',data=encrypted_data+client_data_hmac)
+    if is_error_message(req):
+        return
+    logger.info("Auth successful")
     content = req.content
     client_ratchet_receive_key, client_receive_key, client_receive_iv = ratchet_next(client_ratchet_receive_key, HASH, salt)
-    data, valid_hmac = decrypt_message_hmac(content, CIPHER, MODE, HASH, client_receive_key, client_receive_iv)
+    token, valid_hmac = decrypt_message_hmac(content, CIPHER, MODE, HASH, client_receive_key, client_receive_iv)
     if not valid_hmac:
-        print("Server license token is corrupted")
-        sys.exit(1)
+        logger.error("Server license token is corrupted")
+        return
+    s.headers.update({'token':token}) # Unsure if this needs to be encrypted and sent with every message, as it needs to correspond with the correct clientID and therefore with the shared key
 
 
     # Gets list of musics from the server
     req = s.get(f'{SERVER_URL}/api/list')
-    if req.status_code == 200:
-        print("Got Server List")
+    if is_error_message(req):
+        return
+    logger.info("List successful")
     content = req.content
 
     client_ratchet_receive_key, client_receive_key, client_receive_iv = ratchet_next(client_ratchet_receive_key, HASH, salt)
     data, valid_hmac = decrypt_message_hmac(content, CIPHER, MODE, HASH, client_receive_key, client_receive_iv)
     if not valid_hmac:
-        print("Server list is corrupted")
-        sys.exit(1)
+        logger.error("Server list is corrupted")
+        return
     media_list = json.loads(data)
 
     # Present a simple selection menu    
@@ -199,7 +215,7 @@ def main():
 
     # Example: Download first file
     media_item = media_list[selection]
-    print(f"Playing {media_item['name']}")
+    logger.info(f"Playing {media_item['name']}")
 
     # Detect if we are running on Windows or Linux
     # You need to have ffplay or ffplay.exe in the current folder
@@ -218,23 +234,23 @@ def main():
         encrypted_media_chunk, client_media_chunk_hmac = encrypt_message_hmac(str(chunk).encode('latin'), CIPHER, MODE, HASH, client_send_key, client_send_iv)
 
         req = s.get(f'{SERVER_URL}/api/download?id={base64.urlsafe_b64encode(encrypted_media_id+client_media_id_hmac)}&chunk={base64.urlsafe_b64encode(encrypted_media_chunk+client_media_chunk_hmac)}')
-
-        try:
-            # Check if /download returned an error
-            print(req.json()['error']) # TODO: encrypt error messages
+        if is_error_message(req):
             break
-        except:
-            content = req.content
 
-            client_ratchet_receive_key, client_receive_key, client_receive_iv = ratchet_next(client_ratchet_receive_key, HASH, salt)
-            data, valid_hmac = decrypt_message_hmac(content, CIPHER, MODE, HASH, client_receive_key, client_receive_iv)
-            if not valid_hmac:
-                print("Media chunk is corrupted")
-                sys.exit(1)
-            chunk = json.loads(data)
+        content = req.content
 
-            data = binascii.a2b_base64(chunk['data'].encode('latin'))
+        client_ratchet_receive_key, client_receive_key, client_receive_iv = ratchet_next(client_ratchet_receive_key, HASH, salt)
+        data, valid_hmac = decrypt_message_hmac(content, CIPHER, MODE, HASH, client_receive_key, client_receive_iv)
+        if not valid_hmac:
+            logger.error("Media chunk is corrupted")
+            sys.exit(1)
+        chunk = json.loads(data)
+
+        data = binascii.a2b_base64(chunk['data'].encode('latin'))
+        try:
             proc.stdin.write(data)
+        except:
+            break
 
 if __name__ == '__main__':
     while True:
