@@ -242,8 +242,11 @@ def main():
         client_ratchet_receive_key, client_receive_key, client_receive_iv = ratchet_next(client_ratchet_receive_key, HASH, salt)
         data, valid_hmac = decrypt_message_hmac(content, CIPHER, MODE, HASH, client_receive_key, client_receive_iv)
         if not valid_hmac:
-            logger.error("Media chunk is corrupted")
-            sys.exit(1)
+            if data == None:
+                logger.info("End of media file")
+            else:
+                logger.error("Media chunk is corrupted")
+            break
         chunk = json.loads(data)
 
         data = binascii.a2b_base64(chunk['data'].encode('latin'))
