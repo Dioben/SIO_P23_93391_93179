@@ -298,7 +298,7 @@ class MediaServer(resource.Resource):
 
         chunk_id, valid_hmac = decrypt_message_hmac(chunk_content, CIPHER, MODE, HASH, server_receive_key, server_receive_iv)
         if not valid_hmac:
-            return error_message(request, 400, 'invalid media chunk hmac')
+            return error_message(request, 400, 'invalid media chunk id hmac')
 
         # Check if a chunk is valid
         valid_chunk = False
@@ -310,7 +310,7 @@ class MediaServer(resource.Resource):
             logger.warn("Chunk format is invalid")
 
         if not valid_chunk:
-            return error_message(request, 400, 'invalid media id hmac')
+            return error_message(request, 400, 'invalid media chunk id')
             
         logger.debug(f'Download: chunk: {chunk_id}')
 
