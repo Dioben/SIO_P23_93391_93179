@@ -126,22 +126,23 @@ class MediaServer(resource.Resource):
             Returns the clientID and the server DH parameter"""
         HASH = cipher_suites.HASHES[request.getHeader(b'suite_hash')[0]]
         data = request.content.read()
-        salt = data[0:32]
+        client_salt = data[0:32]
         client_dh = data[32::]
+        server_salt = os.urandom(32)
 
         client_dh = serialization.load_pem_public_key(client_dh)
         server_dh_private = ec.generate_private_key(ec.SECP384R1())
         server_dh = server_dh_private.public_key()
         shared_key = server_dh_private.exchange(ec.ECDH(), client_dh)
-        server_ratchet_key = HKDF(algorithm=HASH(),length=32,salt=salt,info=None).derive(shared_key)
+        server_ratchet_key = HKDF(algorithm=HASH(),length=32,salt=server_salt,info=None).derive(shared_key)
         server_ratchet_receive_key = server_ratchet_key
-        server_ratchet_key = HKDF(algorithm=HASH(),length=32,salt=salt,info=None).derive(server_ratchet_key)
+        server_ratchet_key = HKDF(algorithm=HASH(),length=32,salt=server_salt,info=None).derive(server_ratchet_key)
         server_ratchet_send_key = server_ratchet_key
         
         clientID = uuid.uuid4().hex
-        ids_info[(clientID).encode('latin')] = [server_ratchet_receive_key,server_ratchet_send_key,salt,time()+DAY]
+        ids_info[(clientID).encode('latin')] = [server_ratchet_receive_key,server_ratchet_send_key,client_salt,time()+DAY]
         
-        return (clientID+"\n").encode('latin')+server_dh.public_bytes(encoding=serialization.Encoding.PEM,format=serialization.PublicFormat.SubjectPublicKeyInfo)
+        return clientID.encode('latin')+server_salt+server_dh.public_bytes(encoding=serialization.Encoding.PEM,format=serialization.PublicFormat.SubjectPublicKeyInfo)
 
 
     def do_auth(self,request):

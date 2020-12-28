@@ -130,27 +130,31 @@ def main():
     
     # Diffie-Hellman setup - using ephemeral elliptic for max performance/safety
     # Send salt and client's DH parameter to the server at /key
-    salt = os.urandom(32)
+    client_salt = os.urandom(32)
     client_dh_private = ec.generate_private_key(ec.SECP384R1())
     client_dh = client_dh_private.public_key()
-    payload = salt + client_dh.public_bytes(encoding=serialization.Encoding.PEM,format=serialization.PublicFormat.SubjectPublicKeyInfo)
+    payload = client_salt + client_dh.public_bytes(encoding=serialization.Encoding.PEM,format=serialization.PublicFormat.SubjectPublicKeyInfo)
     req = s.post(f'{SERVER_URL}/api/key',data=payload)
     if is_error_message(req):
         return
     logger.info("Key successful")
 
     # Server returns the client's ID and the server's DH parameter
-    clientID = req.content.split(b"\n",1)[0].decode('latin')
+    content = req.content
+    clientID = content[:32].decode('latin')
     s.headers.update({'id':clientID})
-    server_dh = req.content.split(b"\n",1)[1]
+    server_salt = content[32:64]
+    server_dh = content[64:]
 
     # Calculates shared keys for further messaging
     server_dh = serialization.load_pem_public_key(server_dh)
     shared_key = client_dh_private.exchange(ec.ECDH(), server_dh)
-    client_ratchet_key = HKDF(algorithm=HASH(),length=32,salt=salt,info=None).derive(shared_key)
+    client_ratchet_key = HKDF(algorithm=HASH(),length=32,salt=server_salt,info=None).derive(shared_key)
     client_ratchet_send_key = client_ratchet_key
-    client_ratchet_key = HKDF(algorithm=HASH(),length=32,salt=salt,info=None).derive(client_ratchet_key)
+    client_ratchet_key = HKDF(algorithm=HASH(),length=32,salt=server_salt,info=None).derive(client_ratchet_key)
     client_ratchet_receive_key = client_ratchet_key
+
+    salt = client_salt
 
     # TODO: make the signature check work
 
