@@ -205,6 +205,7 @@ class MediaServer(resource.Resource):
 
         client_certificate, client_signature = x509.load_pem_x509_certificate(data[2:-client_signature_len]), data[-client_signature_len:]
 
+        # TODO: check if license exists (make error message not inform this?)
         license = licenses[client_certificate.public_key().public_bytes(encoding=serialization.Encoding.PEM, format=serialization.PublicFormat.SubjectPublicKeyInfo)]
         if license[0]<=0 or license[1]<time():
             return error_message(request, 401, 'license has expired')
