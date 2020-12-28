@@ -66,21 +66,27 @@ with open('server_media_key', 'rb') as media_key:
     media_key = media_key.read()
 
 def ratchet_next(ratchet_key, HASH, salt):
+    """ Gets current key and the hash and salt for the derivation
+        Returns next derivation of key, a key for a cipher and an iv for a cipher"""
     output = HKDF(algorithm=HASH(),length=80,salt=salt,info=None).derive(ratchet_key)
     ratchet_key, cipher_key, iv = output[:32], output[32:64], output[64:]
     return ratchet_key, cipher_key, iv
 
 def encrypt_message_hmac(data, CIPHER, MODE, HASH, key, iv):
+    """ Gets data to encrypt and the cipher, mode, hash, key and iv necessary to do so
+        Returns the encrypted data and an hmac for authentication and integrity verification """
     encryptor = ciphers.Cipher(CIPHER(key),MODE(iv)).encryptor()
     padder = padding.PKCS7(256).padder()
     encrypted_data = padder.update(data)+padder.finalize()
     encrypted_data = encryptor.update(encrypted_data)+encryptor.finalize()
     data_hmac = hmac.HMAC(key, HASH())
     data_hmac.update(encrypted_data)
-    data_hmac = data_hmac.finalize() # Has to send finalize because only bytes can be sent (is then compared with client's finalize)
+    data_hmac = data_hmac.finalize() # Has to send finalize because only bytes can be sent (is then compared with the other side's finalize)
     return encrypted_data, data_hmac
 
 def decrypt_message_hmac(data, CIPHER, MODE, HASH, key, iv):
+    """ Gets data+hmac to decrypt and the cipher, mode, hash, key and iv necessary to do so
+        Returns the decrypted data and a boolean with the validity of the hmac """
     encrypted_data, data_hmac = data[:-32], data[-32:]
     data_hmac_2 = hmac.HMAC(key, HASH())
     data_hmac_2.update(encrypted_data)
@@ -94,6 +100,9 @@ def decrypt_message_hmac(data, CIPHER, MODE, HASH, key, iv):
     return data, True
 
 def error_message(request, code, message):
+    """ Gets the request, error code and error message 
+        Prepares request to send an error 
+        Returns the error content to send """
     request.setResponseCode(code)
     request.responseHeaders.addRawHeader(b"content-type", b"application/json")
     return json.dumps({'error': message}).encode('latin')
@@ -101,6 +110,8 @@ def error_message(request, code, message):
 media_file_unpadder = padding.PKCS7(256).unpadder()
 media_file_algorithm = ciphers.algorithms.AES(media_key)
 def decrypt_chunk(chunk, iv):
+    """ Gets media chunk to decrypt and the iv to do so 
+        Returns the decrypted media chunk"""
     unpadder = media_file_unpadder
     cipher = ciphers.Cipher(media_file_algorithm, ciphers.modes.CBC(iv))
     decryptor = cipher.decryptor()
@@ -116,7 +127,7 @@ class MediaServer(resource.Resource):
     isLeaf = True
 
     def do_protocols(self,request):
-        """ Gets client random and a list of possible protocols/cipher suite
+        """ Gets a request with a client random and a list of possible protocols/cipher suite
             Chooses from one of the protocols
             Returns the server certificate, the chosen protocol and the signed random"""
         data = request.content.read()
@@ -140,9 +151,9 @@ class MediaServer(resource.Resource):
 
 
     def do_key(self,request):
-        """ Gets salt (random bytes) and the client DH parameter (key used to find the shared key)
-            Calculates shared key and saves the clientID and its time
-            Returns the clientID and the server DH parameter"""
+        """ Gets a request with a client salt (random bytes) and the client DH parameter (key used to find the shared key)
+            Calculates the server salt, receiving key and sending key and saves in the clientID the keys, the client salt and a time limit
+            Returns the clientID, server salt and the server DH parameter"""
         HASH = cipher_suites.HASHES[request.getHeader(b'suite_hash')[0]]
         data = request.content.read()
         client_salt = data[0:32]
@@ -165,8 +176,9 @@ class MediaServer(resource.Resource):
 
 
     def do_auth(self,request):
-        """ Recieves the client's certificate and a client signature
-            Returns a token for a license """
+        """ gets a request with the client's certificate and a client signature
+            Checks if the client's certificate and signature are valid
+            Returns an encrypted token from the client's license """
         if request.getHeader(b'id') not in ids_info.keys():
             return error_message(request, 401, 'id not found')
         if ids_info[request.getHeader(b'id')][3]<time():
@@ -216,8 +228,9 @@ class MediaServer(resource.Resource):
         return encrypted_data + server_data_hmac
 
 
-    # Send the list of media files to clients
     def do_list(self, request):
+        """ Gets a request with the token for validation
+            Returns an encrypted list of all the media files """
         if request.getHeader(b'id') not in ids_info.keys():
             return error_message(request, 401, 'id not found')
         if ids_info[request.getHeader(b'id')][3]<time():
@@ -231,7 +244,6 @@ class MediaServer(resource.Resource):
         MODE = cipher_suites.MODES[request.getHeader(b'suite_mode')[0]]
         HASH = cipher_suites.HASHES[request.getHeader(b'suite_hash')[0]]
 
-        # Key for decrypting the get's parameters
         server_ratchet_receive_key, salt = ids_info[request.getHeader(b'id')][0], ids_info[request.getHeader(b'id')][2]
         server_ratchet_receive_key, server_receive_key, server_receive_iv = ratchet_next(server_ratchet_receive_key, HASH, salt)
         ids_info[request.getHeader(b'id')][0] = server_ratchet_receive_key
@@ -274,8 +286,9 @@ class MediaServer(resource.Resource):
         return encrypted_data+server_data_hmac # May be better to find another way to separate encrypted_data and server_data_hmac
 
 
-    # Send a media chunk to the client
     def do_download(self, request):
+        """ Gets a request with the media id, the chunk wanted and the token for validation 
+            Returns the encrypted media's chunk to play on ffplay"""
         if request.getHeader(b'id') not in ids_info.keys():
             return error_message(request, 401, 'id not found')
         if ids_info[request.getHeader(b'id')][3]<time():
@@ -291,7 +304,6 @@ class MediaServer(resource.Resource):
         MODE = cipher_suites.MODES[request.getHeader(b'suite_mode')[0]]
         HASH = cipher_suites.HASHES[request.getHeader(b'suite_hash')[0]]
 
-        # Key for decrypting the get's parameters
         server_ratchet_receive_key, salt = ids_info[request.getHeader(b'id')][0], ids_info[request.getHeader(b'id')][2]
         server_ratchet_receive_key, server_receive_key, server_receive_iv = ratchet_next(server_ratchet_receive_key, HASH, salt)
         ids_info[request.getHeader(b'id')][0] = server_ratchet_receive_key
@@ -311,7 +323,6 @@ class MediaServer(resource.Resource):
         if not valid_hmac:
             return error_message(request, 400, 'invalid media id hmac')
 
-        # media_id = request.args.get(b'id', [None])[0]
         logger.debug(f'Download: id: {media_id}')
 
         # Check if the media_id is not None as it is required
@@ -414,10 +425,8 @@ class MediaServer(resource.Resource):
         return b''
 
 
-
 print("Server started")
 print("URL is: http://IP:8080")
-#TODO: WE PROBABLY WANNA LOAD CERTS AROUND HERE
 s = server.Site(MediaServer())
 reactor.listenTCP(8080, s)
 reactor.run()
