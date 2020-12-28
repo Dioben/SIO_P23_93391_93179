@@ -70,7 +70,7 @@ def decrypt_message_hmac(data, CIPHER, MODE, HASH, key, iv):
 def is_error_message(req):
     try:
         # Check if server returned an error
-        logger.error(req.status_code+': '+req.json()['error']) # TODO: maybe encrypt error messages
+        logger.error(str(req.status_code)+': '+str(req.json()['error'])) # TODO: maybe encrypt error messages
         return True
     except:
         return 200>=req.status_code>=300
@@ -235,17 +235,14 @@ def main():
 
         req = s.get(f'{SERVER_URL}/api/download?id={base64.urlsafe_b64encode(encrypted_media_id+client_media_id_hmac)}&chunk={base64.urlsafe_b64encode(encrypted_media_chunk+client_media_chunk_hmac)}')
         if is_error_message(req):
-            break
+            return
 
         content = req.content
 
         client_ratchet_receive_key, client_receive_key, client_receive_iv = ratchet_next(client_ratchet_receive_key, HASH, salt)
         data, valid_hmac = decrypt_message_hmac(content, CIPHER, MODE, HASH, client_receive_key, client_receive_iv)
         if not valid_hmac:
-            if data == None:
-                logger.info("End of media file")
-            else:
-                logger.error("Media chunk is corrupted")
+            logger.error("Media chunk is corrupted")
             break
         chunk = json.loads(data)
 
