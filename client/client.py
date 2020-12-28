@@ -1,4 +1,3 @@
-from PyKCS11.LowLevel import ckbytelist
 import requests
 import logging
 import binascii
@@ -34,7 +33,7 @@ with open("cert.der","rb") as cert:
     CLIENT_CERTIFICATE = x509.load_der_x509_certificate(cert.read())
 date = datetime.datetime.now()
 if CLIENT_CERTIFICATE.not_valid_before>date or date>CLIENT_CERTIFICATE.not_valid_after:
-    logger.error("expired cert "+str(CLIENT_CERTIFICATE.public_key))
+    logger.error("expired cert "+str(CLIENT_CERTIFICATE))
     sys.exit(1)
 slots = pkcs11.getSlotList()
 citizen_card_session = pkcs11.openSession(slots[0])

@@ -1,7 +1,4 @@
 #!/usr/bin/env python
-
-from PyKCS11 import ckbytelist
-import requests
 from twisted.web import server, resource
 from twisted.internet import reactor, defer
 import logging
