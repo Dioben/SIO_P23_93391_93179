@@ -180,11 +180,12 @@ def main():
     if not valid_hmac:
         logger.error("Server license token is corrupted")
         return
-    s.headers.update({'token':token}) # Unsure if this needs to be encrypted and sent with every message, as it needs to correspond with the correct clientID and therefore with the shared key
 
+    client_ratchet_send_key, client_send_key, client_send_iv = ratchet_next(client_ratchet_send_key, HASH, salt)
+    encrypted_token, client_token_hmac = encrypt_message_hmac(token, CIPHER, MODE, HASH, client_send_key, client_send_iv)
 
     # Gets list of musics from the server
-    req = s.get(f'{SERVER_URL}/api/list')
+    req = s.get(f'{SERVER_URL}/api/list?token={base64.urlsafe_b64encode(encrypted_token+client_token_hmac)}')
     if is_error_message(req):
         return
     logger.info("List successful")
@@ -235,8 +236,9 @@ def main():
 
         encrypted_media_id, client_media_id_hmac = encrypt_message_hmac(media_item["id"].encode('latin'), CIPHER, MODE, HASH, client_send_key, client_send_iv)
         encrypted_media_chunk, client_media_chunk_hmac = encrypt_message_hmac(str(chunk).encode('latin'), CIPHER, MODE, HASH, client_send_key, client_send_iv)
+        encrypted_token, client_token_hmac = encrypt_message_hmac(token, CIPHER, MODE, HASH, client_send_key, client_send_iv)
 
-        req = s.get(f'{SERVER_URL}/api/download?id={base64.urlsafe_b64encode(encrypted_media_id+client_media_id_hmac)}&chunk={base64.urlsafe_b64encode(encrypted_media_chunk+client_media_chunk_hmac)}')
+        req = s.get(f'{SERVER_URL}/api/download?id={base64.urlsafe_b64encode(encrypted_media_id+client_media_id_hmac)}&chunk={base64.urlsafe_b64encode(encrypted_media_chunk+client_media_chunk_hmac)}&token={base64.urlsafe_b64encode(encrypted_token+client_token_hmac)}')
         if is_error_message(req):
             return
 
