@@ -76,7 +76,7 @@ def is_error_message(req):
     """ Gets request 
         Returns if the request was successful and prints the error if not"""
     try:
-        logger.error(str(req.status_code)+': '+str(req.json()['error'])) # TODO: maybe encrypt error messages
+        logger.error(str(req.status_code)+': '+str(req.json()['error'])) # Error messages are not encrypted
         return True
     except:
         return 200>=req.status_code>=300
@@ -90,7 +90,6 @@ def main():
     # Get a list of media files
     logger.info("Contacting Server")
    
-    # TODO: Secure the session
     s = requests.Session()
 
     # Finds 3 random possible protocol/cipher suite possibilities and a client random (random 32 bytes)
@@ -161,8 +160,6 @@ def main():
     client_ratchet_receive_key = client_ratchet_key
 
     salt = client_salt
-
-    # TODO: make the signature check work
 
     # Signs the clientID
     citizen_card_private_key = citizen_card_session.findObjects([(PyKCS11.CKA_CLASS, PyKCS11.CKO_PRIVATE_KEY),(PyKCS11.CKA_LABEL, 'CITIZEN AUTHENTICATION KEY')])[0]
