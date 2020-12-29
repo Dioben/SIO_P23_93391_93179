@@ -101,9 +101,14 @@ def is_certificate_trusted(certificate : x509.Certificate):
     cert_dict = _get_all_certificates()
     if certificate.issuer in cert_dict.keys():
         while certificate.issuer != certificate.subject:
-            print(certificate)
             if certificate.issuer not in cert_dict.keys():
                 return False
+            cert_dict[certificate.issuer].public_key().verify(
+                certificate.signature,
+                certificate.tbs_certificate_bytes,
+                asympad.PKCS1v15(),
+                certificate.signature_hash_algorithm
+            )
             certificate = cert_dict[certificate.issuer]
         return True
     return False
@@ -154,7 +159,6 @@ def main():
     if not is_certificate_trusted(SERVER_CERTIFICATE):
         logger.error("Server's certificate is not trusted")
         return
-    print(SERVER_CERTIFICATE)
 
     # Checks that the server signed the client random successfully
     server_public_key = SERVER_CERTIFICATE.public_key()
