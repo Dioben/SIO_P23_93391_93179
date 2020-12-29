@@ -213,7 +213,7 @@ class MediaServer(resource.Resource):
         content = request.content.read()
 
         if request.getHeader(b'suite_cipher')[0]!=ids_info[request.getHeader(b'id')][4] or request.getHeader(b'suite_mode')[0]!=ids_info[request.getHeader(b'id')][5] or request.getHeader(b'suite_hash')[0]!=ids_info[request.getHeader(b'id')][6]:
-            return error_message(request, 400, 'incorrect header sipher suite')
+            return error_message(request, 400, 'incorrect header cipher suite')
 
         CIPHER = cipher_suites.CIPHERS[request.getHeader(b'suite_cipher')[0]]
         MODE = cipher_suites.MODES[request.getHeader(b'suite_mode')[0]]
@@ -270,7 +270,7 @@ class MediaServer(resource.Resource):
             return error_message(request, 401, 'id has expired')
 
         if request.getHeader(b'suite_cipher')[0]!=ids_info[request.getHeader(b'id')][4] or request.getHeader(b'suite_mode')[0]!=ids_info[request.getHeader(b'id')][5] or request.getHeader(b'suite_hash')[0]!=ids_info[request.getHeader(b'id')][6]:
-            return error_message(request, 400, 'incorrect header sipher suite')
+            return error_message(request, 400, 'incorrect header cipher suite')
 
         CIPHER = cipher_suites.CIPHERS[request.getHeader(b'suite_cipher')[0]]
         MODE = cipher_suites.MODES[request.getHeader(b'suite_mode')[0]]
@@ -305,7 +305,7 @@ class MediaServer(resource.Resource):
         # Return list to client
         request.responseHeaders.addRawHeader(b"content-type", b"application/json")
         data = json.dumps(media_list, indent=4).encode('latin')
-        
+
         server_ratchet_send_key, salt = ids_info[request.getHeader(b'id')][1], ids_info[request.getHeader(b'id')][2]
         server_ratchet_send_key, server_send_key, server_send_iv = ratchet_next(server_ratchet_send_key, HASH, salt)
         ids_info[request.getHeader(b'id')][1] = server_ratchet_send_key
@@ -330,7 +330,7 @@ class MediaServer(resource.Resource):
         # logger.debug(f'Download: args: {request.args}')
 
         if request.getHeader(b'suite_cipher')[0]!=ids_info[request.getHeader(b'id')][4] or request.getHeader(b'suite_mode')[0]!=ids_info[request.getHeader(b'id')][5] or request.getHeader(b'suite_hash')[0]!=ids_info[request.getHeader(b'id')][6]:
-            return error_message(request, 400, 'incorrect header sipher suite')
+            return error_message(request, 400, 'incorrect header cipher suite')
 
         CIPHER = cipher_suites.CIPHERS[request.getHeader(b'suite_cipher')[0]]
         MODE = cipher_suites.MODES[request.getHeader(b'suite_mode')[0]]
