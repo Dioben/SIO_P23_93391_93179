@@ -168,7 +168,7 @@ def main():
     s.headers.update({
         'suite_hash':(cipher_suites.cs_indexes[cipher_suite[5]]).to_bytes(1,"big"),
         'suite_cipher':(cipher_suites.cs_indexes[cipher_suite[3]]).to_bytes(1,"big"),
-        'suite_mode':(cipher_suites.cs_indexes[cipher_suite[4]]).to_bytes(1,"big")}) # TODO: maybe make the server save them so they cant be changed
+        'suite_mode':(cipher_suites.cs_indexes[cipher_suite[4]]).to_bytes(1,"big")})
     
     # Diffie-Hellman setup - using ephemeral elliptic for max performance/safety
 

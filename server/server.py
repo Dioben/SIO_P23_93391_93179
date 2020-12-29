@@ -51,7 +51,7 @@ with open('server_cert_priv_key.pem','rb') as keyfile:
 with open('server_rest_key', 'rb') as rest_key:
     rest_key = rest_key.read()
 
-# Contains entries: clientID<server_ratchet_receive_key, server_ratchet_send_key, salt, time_valid>
+# Contains entries: clientID<server_ratchet_receive_key, server_ratchet_send_key, salt, time_valid, suite_cipher, suite_mode, suite_hash>
 ids_info = {}
 
 # Contains entries: client_public_key<tokens_left, time_valid>
@@ -192,7 +192,7 @@ class MediaServer(resource.Resource):
         server_ratchet_send_key = server_ratchet_key
         
         clientID = uuid.uuid4().hex
-        ids_info[(clientID).encode('latin')] = [server_ratchet_receive_key,server_ratchet_send_key,client_salt,time()+DAY]
+        ids_info[(clientID).encode('latin')] = [server_ratchet_receive_key,server_ratchet_send_key,client_salt,time()+DAY,request.getHeader(b'suite_cipher')[0],request.getHeader(b'suite_mode')[0],request.getHeader(b'suite_hash')[0]]
         
         return clientID.encode('latin')+server_salt+server_dh.public_bytes(encoding=serialization.Encoding.PEM,format=serialization.PublicFormat.SubjectPublicKeyInfo)
 
@@ -211,6 +211,10 @@ class MediaServer(resource.Resource):
             return error_message(request, 401, 'id has expired')
 
         content = request.content.read()
+
+        if request.getHeader(b'suite_cipher')[0]!=ids_info[request.getHeader(b'id')][4] or request.getHeader(b'suite_mode')[0]!=ids_info[request.getHeader(b'id')][5] or request.getHeader(b'suite_hash')[0]!=ids_info[request.getHeader(b'id')][6]:
+            return error_message(request, 400, 'incorrect header cipher suite')
+
         CIPHER = cipher_suites.CIPHERS[request.getHeader(b'suite_cipher')[0]]
         MODE = cipher_suites.MODES[request.getHeader(b'suite_mode')[0]]
         HASH = cipher_suites.HASHES[request.getHeader(b'suite_hash')[0]]
@@ -265,6 +269,9 @@ class MediaServer(resource.Resource):
                 pass
             return error_message(request, 401, 'id has expired')
 
+        if request.getHeader(b'suite_cipher')[0]!=ids_info[request.getHeader(b'id')][4] or request.getHeader(b'suite_mode')[0]!=ids_info[request.getHeader(b'id')][5] or request.getHeader(b'suite_hash')[0]!=ids_info[request.getHeader(b'id')][6]:
+            return error_message(request, 400, 'incorrect header cipher suite')
+
         CIPHER = cipher_suites.CIPHERS[request.getHeader(b'suite_cipher')[0]]
         MODE = cipher_suites.MODES[request.getHeader(b'suite_mode')[0]]
         HASH = cipher_suites.HASHES[request.getHeader(b'suite_hash')[0]]
@@ -299,9 +306,6 @@ class MediaServer(resource.Resource):
         request.responseHeaders.addRawHeader(b"content-type", b"application/json")
         data = json.dumps(media_list, indent=4).encode('latin')
 
-        CIPHER = cipher_suites.CIPHERS[request.getHeader(b'suite_cipher')[0]]
-        MODE = cipher_suites.MODES[request.getHeader(b'suite_mode')[0]]
-        HASH = cipher_suites.HASHES[request.getHeader(b'suite_hash')[0]]
         server_ratchet_send_key, salt = ids_info[request.getHeader(b'id')][1], ids_info[request.getHeader(b'id')][2]
         server_ratchet_send_key, server_send_key, server_send_iv = ratchet_next(server_ratchet_send_key, HASH, salt)
         ids_info[request.getHeader(b'id')][1] = server_ratchet_send_key
@@ -324,6 +328,9 @@ class MediaServer(resource.Resource):
             return error_message(request, 401, 'id has expired')
 
         # logger.debug(f'Download: args: {request.args}')
+
+        if request.getHeader(b'suite_cipher')[0]!=ids_info[request.getHeader(b'id')][4] or request.getHeader(b'suite_mode')[0]!=ids_info[request.getHeader(b'id')][5] or request.getHeader(b'suite_hash')[0]!=ids_info[request.getHeader(b'id')][6]:
+            return error_message(request, 400, 'incorrect header cipher suite')
 
         CIPHER = cipher_suites.CIPHERS[request.getHeader(b'suite_cipher')[0]]
         MODE = cipher_suites.MODES[request.getHeader(b'suite_mode')[0]]
