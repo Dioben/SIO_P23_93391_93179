@@ -74,12 +74,39 @@ def decrypt_message_hmac(data, CIPHER, MODE, HASH, key, iv):
 
 def is_error_message(req):
     """ Gets request 
-        Returns if the request was successful and prints the error if not"""
+        Returns if the request was successful and prints the error if not """
     try:
         logger.error(str(req.status_code)+': '+str(req.json()['error'])) # Error messages are not encrypted
         return True
     except:
         return 200>=req.status_code>=300
+
+def _get_all_certificates():
+    """ Returns all certificates in the client's machine (/etc/ssl/certs/) """
+    ret = {}
+    files = os.scandir("/etc/ssl/certs")
+    for file in files:
+        if not file.is_dir():
+            with open(file,"rb") as file:
+                data = file.read()
+                certificate = x509.load_pem_x509_certificate(data)
+                date = datetime.datetime.now()
+                if certificate != None and certificate.not_valid_before<date<certificate.not_valid_after:
+                    ret[certificate.subject]=certificate
+    return ret
+
+def is_certificate_trusted(certificate : x509.Certificate):
+    """ Gets a certificate 
+        Returns if the certificate's issuer is root and in the client's machine """
+    cert_dict = _get_all_certificates()
+    if certificate.issuer in cert_dict.keys():
+        while certificate.issuer != certificate.subject:
+            print(certificate)
+            if certificate.issuer not in cert_dict.keys():
+                return False
+            certificate = cert_dict[certificate.issuer]
+        return True
+    return False
 
 def main():
     
@@ -119,8 +146,15 @@ def main():
     if SERVER_CERTIFICATE.not_valid_before>date or date>SERVER_CERTIFICATE.not_valid_after:
         logger.error("Expired server cert: "+str(SERVER_CERTIFICATE.not_valid_before)+" - "+str(SERVER_CERTIFICATE.not_valid_after))
         return
+    if SERVER_CERTIFICATE.subject.get_attributes_for_oid(x509.NameOID.COMMON_NAME)[0].value != SERVER_URL.split('//',1)[1].split(':',1)[0]:
+        logger.error("Incorrect server common name: "+SERVER_CERTIFICATE.subject.get_attributes_for_oid(x509.NameOID.COMMON_NAME)[0].value)
+        return
 
-    # TODO: check certificate chain
+    # Checks that the client trusts the server's certificate (looks at the certificates in /etc/ssl/certs/)
+    if not is_certificate_trusted(SERVER_CERTIFICATE):
+        logger.error("Server's certificate is not trusted")
+        return
+    print(SERVER_CERTIFICATE)
 
     # Checks that the server signed the client random successfully
     server_public_key = SERVER_CERTIFICATE.public_key()

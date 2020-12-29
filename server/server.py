@@ -41,10 +41,10 @@ CHUNK_SIZE = 1024 * 4
 HOUR = 3600
 DAY = 24*3600
 
-with open("127.0.0.1.crt","rb") as cert:
+with open("server_cert.crt","rb") as cert:
     SERVER_PEM_CERTIFICATE = cert.read()
     SERVER_CERTIFICATE = x509.load_pem_x509_certificate(SERVER_PEM_CERTIFICATE)
-with open('privkey.pem','rb') as keyfile:
+with open('server_cert_priv_key.pem','rb') as keyfile:
     SERVER_PRIVATE_KEY = serialization.load_pem_private_key(keyfile.read(),password=None)
 
 # Contains entries: clientID<server_ratchet_receive_key, server_ratchet_send_key, salt, time_valid>
@@ -53,7 +53,7 @@ ids_info = {}
 # Contains entries: client_public_key<tokens_left, time_valid>
 licenses = {}
 # Adding the clients certificate to licenses
-# TODO: change to make it add from the PKI / certificate chain
+# TODO: change to make it add all encrypted certs in a folder
 with open("../client/cert.der","rb") as cert:
     license_client_certificate = x509.load_der_x509_certificate(cert.read())
     licenses[license_client_certificate.public_key().public_bytes(encoding=serialization.Encoding.PEM, format=serialization.PublicFormat.SubjectPublicKeyInfo)] = [5, time()+HOUR/6] # TODO: increase values for delivery
