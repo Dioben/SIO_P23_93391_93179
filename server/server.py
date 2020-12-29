@@ -129,13 +129,11 @@ def error_message(request, code, message):
     request.responseHeaders.addRawHeader(b"content-type", b"application/json")
     return json.dumps({'error': message}).encode('latin')
 
-media_file_unpadder = padding.PKCS7(256).unpadder()
-media_file_algorithm = ciphers.algorithms.AES(rest_key)
 def decrypt_chunk(chunk, iv):
     """ Gets media chunk to decrypt and the iv to do so 
         Returns the decrypted media chunk"""
-    unpadder = media_file_unpadder
-    cipher = ciphers.Cipher(media_file_algorithm, ciphers.modes.CBC(iv))
+    unpadder = padding.PKCS7(256).unpadder()
+    cipher = ciphers.Cipher(ciphers.algorithms.AES(rest_key), ciphers.modes.CBC(iv))
     decryptor = cipher.decryptor()
     if len(chunk)<CHUNK_SIZE:
         chunk = decryptor.update(chunk) + decryptor.finalize()
@@ -436,7 +434,7 @@ class MediaServer(resource.Resource):
                 return self.do_download(request)
             else:
                 request.responseHeaders.addRawHeader(b"content-type", b'text/plain')
-                return b'Methods: /api/protocols /api/list /api/download'
+                return b'Methods: /api/list /api/download'
 
         except Exception as e:
             logger.exception(e)
@@ -447,14 +445,21 @@ class MediaServer(resource.Resource):
     # Handle a POST request
     def render_POST(self, request):
         logger.debug(f'Received POST request for {request.uri}')
-        if request.path==b'/api/key':
-            return self.do_key(request)
-        elif request.path == b'/api/auth':
-            return self.do_auth(request)
-        elif request.path == b'/api/protocols':
-            return self.do_protocols(request)
-        request.setResponseCode(501)
-        return b''
+        try:
+            if request.path==b'/api/key':
+                return self.do_key(request)
+            elif request.path == b'/api/auth':
+                return self.do_auth(request)
+            elif request.path == b'/api/protocols':
+                return self.do_protocols(request)
+            else:
+                request.responseHeaders.addRawHeader(b"content-type", b'text/plain')
+                return b'Methods: /api/key /api/auth /api/protocols'
+        except Exception as e:
+            logger.exception(e)
+            request.setResponseCode(500)
+            request.responseHeaders.addRawHeader(b"content-type", b"text/plain")
+            return b''
 
 
 print("Server started")
