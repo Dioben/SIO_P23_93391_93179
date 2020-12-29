@@ -60,26 +60,29 @@ licenses = {}
 # Adding the encrypted clients' certificates in a file to licenses
 trusted_client_certificates = os.scandir('client_certificates/')
 for file in trusted_client_certificates:
-    decrypted_file = b''
-    with open(file, 'rb') as encrypted_file:
-        iv = encrypted_file.read(16)
-        chunk_size = CHUNK_SIZE
-        unpadder = padding.PKCS7(256).unpadder()
-        cipher = ciphers.Cipher(ciphers.algorithms.AES(rest_key),  ciphers.modes.CBC(iv))
-        decryptor = cipher.decryptor()
-        chunk = encrypted_file.read(chunk_size)
-        while True:
-            chunk = decryptor.update(chunk)
-            chunk = unpadder.update(chunk)
-            decrypted_file += chunk
+    try: # Done so it ignores other files
+        decrypted_file = b''
+        with open(file, 'rb') as encrypted_file:
+            iv = encrypted_file.read(16)
+            chunk_size = CHUNK_SIZE
+            unpadder = padding.PKCS7(256).unpadder()
+            cipher = ciphers.Cipher(ciphers.algorithms.AES(rest_key),  ciphers.modes.CBC(iv))
+            decryptor = cipher.decryptor()
             chunk = encrypted_file.read(chunk_size)
-            if len(chunk)<chunk_size:
-                chunk = decryptor.update(chunk) + decryptor.finalize()
-                chunk = unpadder.update(chunk) + unpadder.finalize()
+            while True:
+                chunk = decryptor.update(chunk)
+                chunk = unpadder.update(chunk)
                 decrypted_file += chunk
-                break
-    license_client_certificate = x509.load_der_x509_certificate(decrypted_file)
-    licenses[license_client_certificate.public_key().public_bytes(encoding=serialization.Encoding.PEM, format=serialization.PublicFormat.SubjectPublicKeyInfo)] = [5, time()+HOUR/6] # TODO: increase values for delivery
+                chunk = encrypted_file.read(chunk_size)
+                if len(chunk)<chunk_size:
+                    chunk = decryptor.update(chunk) + decryptor.finalize()
+                    chunk = unpadder.update(chunk) + unpadder.finalize()
+                    decrypted_file += chunk
+                    break
+        license_client_certificate = x509.load_der_x509_certificate(decrypted_file)
+        licenses[license_client_certificate.public_key().public_bytes(encoding=serialization.Encoding.PEM, format=serialization.PublicFormat.SubjectPublicKeyInfo)] = [5, time()+HOUR/6] # TODO: increase values for delivery
+    except:
+        continue
 
 # Contains entries: token<time_valid>
 license_tokens = {}
