@@ -53,7 +53,7 @@ ids_info = {}
 # Contains entries: client_public_key<tokens_left, time_valid>
 licenses = {}
 # Adding the clients certificate to licenses
-# TODO: change to make it add from the PKI
+# TODO: change to make it add from the PKI / certificate chain
 with open("../client/cert.der","rb") as cert:
     license_client_certificate = x509.load_der_x509_certificate(cert.read())
     licenses[license_client_certificate.public_key().public_bytes(encoding=serialization.Encoding.PEM, format=serialization.PublicFormat.SubjectPublicKeyInfo)] = [5, time()+HOUR/6] # TODO: increase values for delivery
@@ -205,8 +205,10 @@ class MediaServer(resource.Resource):
 
         client_certificate, client_signature = x509.load_pem_x509_certificate(data[2:-client_signature_len]), data[-client_signature_len:]
 
-        # TODO: check if license exists (make error message not inform this?)
-        license = licenses[client_certificate.public_key().public_bytes(encoding=serialization.Encoding.PEM, format=serialization.PublicFormat.SubjectPublicKeyInfo)]
+        client_certificate_public_key_bytes = client_certificate.public_key().public_bytes(encoding=serialization.Encoding.PEM, format=serialization.PublicFormat.SubjectPublicKeyInfo)
+        if client_certificate_public_key_bytes not in licenses: # This is equivalent to checking the certificate chain licenses contains all certificates trusted by the server
+            return error_message(request, 401, 'license has expired') # Message is slightly incorrect to not give information of which certificates have licenses
+        license = licenses[client_certificate_public_key_bytes]
         if license[0]<=0 or license[1]<time():
             return error_message(request, 401, 'license has expired')
         license[0] -= 1
