@@ -47,23 +47,42 @@ with open("server_cert.crt","rb") as cert:
 with open('server_cert_priv_key.pem','rb') as keyfile:
     SERVER_PRIVATE_KEY = serialization.load_pem_private_key(keyfile.read(),password=None)
 
+# Key for decrypting server files
+with open('server_rest_key', 'rb') as rest_key:
+    rest_key = rest_key.read()
+
 # Contains entries: clientID<server_ratchet_receive_key, server_ratchet_send_key, salt, time_valid>
 ids_info = {}
 
 # Contains entries: client_public_key<tokens_left, time_valid>
 licenses = {}
-# Adding the clients certificate to licenses
-# TODO: change to make it add all encrypted certs in a folder
-with open("../client/cert.der","rb") as cert:
-    license_client_certificate = x509.load_der_x509_certificate(cert.read())
+
+# Adding the encrypted clients' certificates in a file to licenses
+trusted_client_certificates = os.scandir('client_certificates/')
+for file in trusted_client_certificates:
+    decrypted_file = b''
+    with open(file, 'rb') as encrypted_file:
+        iv = encrypted_file.read(16)
+        chunk_size = CHUNK_SIZE
+        unpadder = padding.PKCS7(256).unpadder()
+        cipher = ciphers.Cipher(ciphers.algorithms.AES(rest_key),  ciphers.modes.CBC(iv))
+        decryptor = cipher.decryptor()
+        chunk = encrypted_file.read(chunk_size)
+        while True:
+            chunk = decryptor.update(chunk)
+            chunk = unpadder.update(chunk)
+            decrypted_file += chunk
+            chunk = encrypted_file.read(chunk_size)
+            if len(chunk)<chunk_size:
+                chunk = decryptor.update(chunk) + decryptor.finalize()
+                chunk = unpadder.update(chunk) + unpadder.finalize()
+                decrypted_file += chunk
+                break
+    license_client_certificate = x509.load_der_x509_certificate(decrypted_file)
     licenses[license_client_certificate.public_key().public_bytes(encoding=serialization.Encoding.PEM, format=serialization.PublicFormat.SubjectPublicKeyInfo)] = [5, time()+HOUR/6] # TODO: increase values for delivery
 
 # Contains entries: token<time_valid>
 license_tokens = {}
-
-# Key for decrypting media files
-with open('server_media_key', 'rb') as media_key:
-    media_key = media_key.read()
 
 def ratchet_next(ratchet_key, HASH, salt):
     """ Gets current key and the hash and salt for the derivation
@@ -108,7 +127,7 @@ def error_message(request, code, message):
     return json.dumps({'error': message}).encode('latin')
 
 media_file_unpadder = padding.PKCS7(256).unpadder()
-media_file_algorithm = ciphers.algorithms.AES(media_key)
+media_file_algorithm = ciphers.algorithms.AES(rest_key)
 def decrypt_chunk(chunk, iv):
     """ Gets media chunk to decrypt and the iv to do so 
         Returns the decrypted media chunk"""
