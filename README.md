@@ -1,4 +1,4 @@
-  Before running <b>server.py</b> and <b>client.py</b>, it is necessary to extract the certificate from a known citizen card as <b>cert.der</b> and put it in <b>client/</b> and to encrypt it for the server by running <b>server/file_encrypt.py</b>. It is also necessary to move <b>client/root_ca.crt</b> to <b>/etc/ssl/certs/</b>.
+  Before running <b>server.py</b> and <b>client.py</b>, it is necessary to extract the certificate from a known citizen card into a file named <b>cert.der</b> and put it in <b>client/</b> and to encrypt it for the server by running <b>server/file_encrypt.py</b>. It is also necessary to move <b>client/root_ca.crt</b> to <b>/etc/ssl/certs/</b>.
 
 <b>client/cipher_suites.py</b> and server/cipher_suites.py contain support for both the client and the server regarding cipher suites.
 
