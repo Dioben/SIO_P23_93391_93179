@@ -39,7 +39,8 @@ CATALOG_BASE = 'catalog'
 CHUNK_SIZE = 1024 * 4
 
 HOUR = 3600
-DAY = 24*3600
+DAY = 24*HOUR
+YEAR = 365*DAY
 
 with open("server_cert.crt","rb") as cert:
     SERVER_PEM_CERTIFICATE = cert.read()
@@ -80,7 +81,7 @@ for file in trusted_client_certificates:
                     decrypted_file += chunk
                     break
         license_client_certificate = x509.load_der_x509_certificate(decrypted_file)
-        licenses[license_client_certificate.public_key().public_bytes(encoding=serialization.Encoding.PEM, format=serialization.PublicFormat.SubjectPublicKeyInfo)] = [5, time()+HOUR/6] # TODO: increase values for delivery
+        licenses[license_client_certificate.public_key().public_bytes(encoding=serialization.Encoding.PEM, format=serialization.PublicFormat.SubjectPublicKeyInfo)] = [200, time()+YEAR]
     except:
         continue
 
@@ -190,7 +191,7 @@ class MediaServer(resource.Resource):
         server_ratchet_send_key = server_ratchet_key
         
         clientID = uuid.uuid4().hex
-        ids_info[(clientID).encode('latin')] = [server_ratchet_receive_key,server_ratchet_send_key,client_salt,time()+DAY,request.getHeader(b'suite_cipher')[0],request.getHeader(b'suite_mode')[0],request.getHeader(b'suite_hash')[0]]
+        ids_info[(clientID).encode('latin')] = [server_ratchet_receive_key,server_ratchet_send_key,client_salt,time()+DAY/2,request.getHeader(b'suite_cipher')[0],request.getHeader(b'suite_mode')[0],request.getHeader(b'suite_hash')[0]]
         
         return clientID.encode('latin')+server_salt+server_dh.public_bytes(encoding=serialization.Encoding.PEM,format=serialization.PublicFormat.SubjectPublicKeyInfo)
 
@@ -237,14 +238,13 @@ class MediaServer(resource.Resource):
             return error_message(request, 401, 'license has expired')
         license[0] -= 1
 
-        # TODO: uncomment signature validation (only commented because it doesnt work on one of the members)
-        # try:
-        #     client_certificate.public_key().verify(client_signature,request.getHeader(b'id'),asympad.PKCS1v15(),hashes.SHA256())
-        # except:
-        #     return error_message(request, 400, 'invalid signature')
+        try:
+            client_certificate.public_key().verify(client_signature,request.getHeader(b'id'),asympad.PKCS1v15(),hashes.SHA256())
+        except:
+            return error_message(request, 400, 'invalid signature')
 
         token = base64.urlsafe_b64encode(os.urandom(256))
-        license_tokens[token] = time()+HOUR/60 # TODO: increase value for delivery
+        license_tokens[token] = time()+HOUR/2
 
         server_ratchet_send_key, salt = ids_info[request.getHeader(b'id')][1], ids_info[request.getHeader(b'id')][2]
         server_ratchet_send_key, server_send_key, server_send_iv = ratchet_next(server_ratchet_send_key, HASH, salt)
